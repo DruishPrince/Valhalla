@@ -141,6 +141,7 @@ class AsgardEnhanced(QMainWindow):
         self.viz_drag_start = None
         self.viz_target_pos = None
         self.viz_drag_viewport = None  # Which viewport we're dragging in
+        self.viz_drag_counter = 0  # Counter for debug output
 
         # Load configuration
         self.config = get_config()
@@ -1086,11 +1087,12 @@ class AsgardEnhanced(QMainWindow):
                       c='orange', s=150, marker='^',
                       edgecolors='black', linewidths=2)
 
-            # Show drag target if enabled
-            if self.viz_show_target.isChecked() and self.viz_target_pos:
+            # Show drag target if enabled OR currently dragging
+            if self.viz_target_pos and (self.viz_show_target.isChecked() or self.viz_dragging):
                 ax.scatter([self.viz_target_pos[0]], [self.viz_target_pos[1]], [self.viz_target_pos[2]],
-                          c='cyan', s=100, marker='*',
-                          edgecolors='black', linewidths=1)
+                          c='cyan', s=120, marker='*',
+                          edgecolors='yellow', linewidths=2,
+                          label='Target' if not self.viz_dragging else 'Dragging...')
 
             # Set axis limits
             ax.set_xlim([-max_range, max_range])
@@ -1180,6 +1182,7 @@ class AsgardEnhanced(QMainWindow):
             self.viz_dragging = False
             self.viz_drag_start = None
             self.viz_drag_viewport = None
+            self.viz_drag_counter = 0  # Reset counter
 
             # Calculate IK for final position if we have a target
             if self.viz_target_pos:
@@ -1218,31 +1221,39 @@ class AsgardEnhanced(QMainWindow):
         if event.xdata is None or event.ydata is None:
             return
 
-        # Calculate movement deltas
+        # Calculate movement deltas (increase sensitivity)
         dx = (event.xdata - self.viz_drag_start[0])
         dy = (event.ydata - self.viz_drag_start[1])
+
+        # Increased sensitivity for better responsiveness
+        sensitivity = 2.0
 
         # Update target position based on which viewport we're dragging in
         # Each viewport has different axes mappings
         if self.viz_drag_viewport == 'top':
             # Top view: drag in XY plane (looking down Z)
-            self.viz_target_pos[0] += dx * 0.5  # X
-            self.viz_target_pos[1] += dy * 0.5  # Y
+            self.viz_target_pos[0] += dx * sensitivity  # X
+            self.viz_target_pos[1] += dy * sensitivity  # Y
             # Z stays constant
         elif self.viz_drag_viewport == 'front':
             # Front view: drag in XZ plane (looking from Y)
-            self.viz_target_pos[0] += dx * 0.5  # X
-            self.viz_target_pos[2] += dy * 0.5  # Z
+            self.viz_target_pos[0] += dx * sensitivity  # X
+            self.viz_target_pos[2] += dy * sensitivity  # Z
             # Y stays constant
         elif self.viz_drag_viewport == 'side':
             # Side view: drag in YZ plane (looking from X)
-            self.viz_target_pos[1] += dx * 0.5  # Y
-            self.viz_target_pos[2] += dy * 0.5  # Z
+            self.viz_target_pos[1] += dx * sensitivity  # Y
+            self.viz_target_pos[2] += dy * sensitivity  # Z
             # X stays constant
         else:  # perspective or default
             # Perspective: drag in XY plane
-            self.viz_target_pos[0] += dx * 0.5  # X
-            self.viz_target_pos[1] += dy * 0.5  # Y
+            self.viz_target_pos[0] += dx * sensitivity  # X
+            self.viz_target_pos[1] += dy * sensitivity  # Y
+
+        # Clamp positions to reasonable workspace
+        self.viz_target_pos[0] = max(-600, min(600, self.viz_target_pos[0]))
+        self.viz_target_pos[1] = max(-600, min(600, self.viz_target_pos[1]))
+        self.viz_target_pos[2] = max(0, min(600, self.viz_target_pos[2]))
 
         # Update drag start for next delta
         self.viz_drag_start = (event.xdata, event.ydata)
@@ -1272,8 +1283,20 @@ class AsgardEnhanced(QMainWindow):
                     self.joint_controls[joint_id]['spinbox'].blockSignals(False)
                     self.joint_controls[joint_id]['slider'].blockSignals(False)
 
+            # Log position periodically (every 10th drag event)
+            self.viz_drag_counter += 1
+            if self.viz_drag_counter % 10 == 0:
+                self.viz_info_label.setText(
+                    f"Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm"
+                )
+
             # Update visualization
             self.update_3d_visualization()
+        else:
+            # IK failed - log it occasionally
+            self.viz_drag_counter += 1
+            if self.viz_drag_counter % 20 == 0:
+                self.log_console(f"IK failed for target ({target.x:.0f}, {target.y:.0f}, {target.z:.0f}) - out of reach?")
 
     def on_viz_scroll(self, event):
         """Handle mouse scroll in 3D visualization"""
