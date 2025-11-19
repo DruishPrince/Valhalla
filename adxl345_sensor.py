@@ -19,7 +19,8 @@ try:
     I2C_AVAILABLE = True
 except ImportError:
     I2C_AVAILABLE = False
-    print("Warning: smbus2 not available. Install with: pip install smbus2")
+    # Note: smbus2 is only needed for physical ADXL345 sensors on Linux/Raspberry Pi
+    # On Windows this is expected and won't affect GUI functionality
 
 
 class DataRate(Enum):

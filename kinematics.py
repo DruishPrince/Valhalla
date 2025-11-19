@@ -261,8 +261,7 @@ class ThorKinematics:
                 elif key in ['B', 'D']:
                     angles[key] = np.clip(angles[key], -90, 90)
 
-        # Failed to converge
-        print(f"IK failed to converge. Final error: {error_magnitude:.2f} mm")
+        # Failed to converge - caller will handle the error
         return None
 
     def _calculate_jacobian(self, angles: Dict[str, float], joint_keys: List[str]) -> np.ndarray:
