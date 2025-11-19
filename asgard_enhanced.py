@@ -124,6 +124,7 @@ class VisualizerEventFilter(QObject):
         self.last_y = 0
         self.drag_viewport = None
         self.dragging_joint = None  # Which joint index is being dragged (None = end effector)
+        self.frame_skip_counter = 0  # For performance - update every N frames
 
     def find_nearest_joint(self, mouse_x, mouse_y, viewport):
         """
@@ -155,7 +156,7 @@ class VisualizerEventFilter(QObject):
         # This is a simplified projection - a full solution would use the actual matplotlib transform
         min_dist = float('inf')
         nearest_joint = None
-        click_threshold = 0.15  # Threshold in normalized coords (0-1) - more forgiving
+        click_threshold = 0.25  # VERY forgiving threshold (25% of viewport)
 
         for i, joint_pos in enumerate(joint_positions):
             # Project to 2D based on viewport
@@ -178,11 +179,17 @@ class VisualizerEventFilter(QObject):
             # Calculate distance
             dist = ((proj_x - quadrant_mouse_x)**2 + (proj_y - quadrant_mouse_y)**2)**0.5
 
-            if dist < min_dist and dist < click_threshold:
+            if dist < min_dist:
                 min_dist = dist
                 nearest_joint = i
 
-        return nearest_joint
+        # Only return if within threshold
+        if min_dist < click_threshold:
+            self.gui.log_console(f"  Found nearest joint: {nearest_joint} (distance: {min_dist:.3f})")
+            return nearest_joint
+        else:
+            self.gui.log_console(f"  No joint near click (min distance: {min_dist:.3f}, threshold: {click_threshold})")
+            return None
 
     def eventFilter(self, obj, event):
         """Filter Qt mouse events on the canvas"""
@@ -195,6 +202,8 @@ class VisualizerEventFilter(QObject):
         # Middle mouse button press - start dragging
         if event_type == QEvent.MouseButtonPress:
             if event.button() == Qt.MiddleButton:
+                self.gui.log_console(f"🖱️  Middle-click at ({event.x()}, {event.y()})")
+
                 if not self.gui.viz_interactive_mode.isChecked():
                     self.gui.log_console("⚠ Interactive mode is OFF - enable it to drag")
                     return False
@@ -202,6 +211,7 @@ class VisualizerEventFilter(QObject):
                 self.dragging = True
                 self.last_x = event.x()
                 self.last_y = event.y()
+                self.frame_skip_counter = 0  # Reset frame counter
 
                 # Get current end effector position
                 current_angles = {joint_id: ctrl['spinbox'].value()
@@ -226,6 +236,8 @@ class VisualizerEventFilter(QObject):
                     else:  # Right
                         self.drag_viewport = 'persp'
 
+                self.gui.log_console(f"  Viewport: {self.drag_viewport.upper()}")
+
                 # Detect which joint (if any) is being clicked
                 self.dragging_joint = self.find_nearest_joint(event.x(), event.y(), self.drag_viewport)
 
@@ -236,9 +248,9 @@ class VisualizerEventFilter(QObject):
                 if self.dragging_joint is not None:
                     joint_names = ['Base', 'Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'End Effector']
                     joint_name = joint_names[self.dragging_joint] if self.dragging_joint < len(joint_names) else f'Joint {self.dragging_joint}'
-                    self.gui.log_console(f"✓ DRAGGING {joint_name} in {view_label} view")
+                    self.gui.log_console(f"✓ DRAGGING {joint_name} in {view_label} view - move mouse to adjust")
                 else:
-                    self.gui.log_console(f"✓ DRAG STARTED in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
+                    self.gui.log_console(f"✓ DRAG STARTED (end effector) in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
 
                 return True  # Consume event to prevent matplotlib from seeing it
 
@@ -246,6 +258,7 @@ class VisualizerEventFilter(QObject):
         elif event_type == QEvent.MouseButtonRelease:
             if event.button() == Qt.MiddleButton and self.dragging:
                 self.dragging = False
+                self.frame_skip_counter = 0  # Reset frame counter
 
                 # Only calculate IK if we were dragging end effector (not a specific joint)
                 if self.dragging_joint is None and self.gui.viz_target_pos:
@@ -326,13 +339,15 @@ class VisualizerEventFilter(QObject):
                         self.gui.joint_controls[joint_to_control]['spinbox'].blockSignals(False)
                         self.gui.joint_controls[joint_to_control]['slider'].blockSignals(False)
 
-                        # Update info label
+                        # Update info label every frame (lightweight)
                         self.gui.viz_info_label.setText(
                             f"Dragging Joint {joint_to_control}: {new_angle:.1f}°"
                         )
 
-                        # Update visualization
-                        self.gui.update_3d_visualization()
+                        # Update visualization every 2nd frame to reduce lag
+                        self.frame_skip_counter += 1
+                        if self.frame_skip_counter % 2 == 0:
+                            self.gui.update_3d_visualization()
 
                 else:
                     # Dragging end effector - use IK
@@ -372,29 +387,32 @@ class VisualizerEventFilter(QObject):
                         z=self.gui.viz_target_pos[2]
                     )
 
-                    current_angles = {joint_id: ctrl['spinbox'].value()
-                                     for joint_id, ctrl in self.gui.joint_controls.items()}
-                    ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
+                    # Only calculate IK every 3rd frame to reduce lag
+                    self.frame_skip_counter += 1
+                    if self.frame_skip_counter % 3 == 0:
+                        current_angles = {joint_id: ctrl['spinbox'].value()
+                                         for joint_id, ctrl in self.gui.joint_controls.items()}
+                        ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
 
-                    if ik_result.success:
-                        # Update joint controls without triggering moves
-                        for joint_id, angle in ik_result.angles.items():
-                            if joint_id in self.gui.joint_controls:
-                                self.gui.joint_controls[joint_id]['spinbox'].blockSignals(True)
-                                self.gui.joint_controls[joint_id]['slider'].blockSignals(True)
-                                self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
-                                self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
-                                self.gui.joint_controls[joint_id]['spinbox'].blockSignals(False)
-                                self.gui.joint_controls[joint_id]['slider'].blockSignals(False)
+                        if ik_result.success:
+                            # Update joint controls without triggering moves
+                            for joint_id, angle in ik_result.angles.items():
+                                if joint_id in self.gui.joint_controls:
+                                    self.gui.joint_controls[joint_id]['spinbox'].blockSignals(True)
+                                    self.gui.joint_controls[joint_id]['slider'].blockSignals(True)
+                                    self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
+                                    self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
+                                    self.gui.joint_controls[joint_id]['spinbox'].blockSignals(False)
+                                    self.gui.joint_controls[joint_id]['slider'].blockSignals(False)
 
-                        # Update info label
-                        status_prefix = "~" if ik_result.is_approximate else ""
-                        self.gui.viz_info_label.setText(
-                            f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
-                        )
+                            # Update info label
+                            status_prefix = "~" if ik_result.is_approximate else ""
+                            self.gui.viz_info_label.setText(
+                                f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
+                            )
 
-                        # Update visualization
-                        self.gui.update_3d_visualization()
+                            # Update visualization
+                            self.gui.update_3d_visualization()
 
                 return True  # Consume event
 
