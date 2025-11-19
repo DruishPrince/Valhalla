@@ -376,6 +376,11 @@ class AsgardEnhanced(QMainWindow):
         self.viz_interactive_mode.setChecked(True)
         controls_layout.addWidget(self.viz_interactive_mode)
 
+        # Alternative keyboard controls
+        keyboard_controls_label = QLabel("OR use keyboard: ← → ↑ ↓ for XY, PgUp/PgDn for Z")
+        keyboard_controls_label.setStyleSheet("color: gray; font-style: italic;")
+        controls_layout.addWidget(keyboard_controls_label)
+
         self.viz_auto_update = QCheckBox("Auto-update from joint controls")
         self.viz_auto_update.setChecked(True)
         controls_layout.addWidget(self.viz_auto_update)
@@ -415,10 +420,6 @@ class AsgardEnhanced(QMainWindow):
         self.viz_figure = Figure(figsize=(12, 10))
         self.viz_canvas = FigureCanvas(self.viz_figure)
 
-        # Disable matplotlib's default toolbar navigation (important for custom mouse handling)
-        self.viz_canvas.setFocusPolicy(Qt.ClickFocus)
-        self.viz_canvas.setFocus()
-
         # Create 2x2 grid of subplots
         # Top-left: Top view (XY plane)
         self.viz_ax_top = self.viz_figure.add_subplot(221, projection='3d')
@@ -436,6 +437,20 @@ class AsgardEnhanced(QMainWindow):
         self.viz_ax_persp = self.viz_figure.add_subplot(224, projection='3d')
         self.viz_ax_persp.set_title('PERSPECTIVE', fontweight='bold', fontsize=10)
 
+        # CRITICAL: Disable matplotlib's toolbar and navigation completely
+        self.viz_canvas.setFocusPolicy(Qt.StrongFocus)
+        self.viz_canvas.setFocus()
+
+        # Disable all matplotlib default mouse/key bindings
+        for ax in [self.viz_ax_top, self.viz_ax_front, self.viz_ax_side, self.viz_ax_persp]:
+            ax.set_navigate(False)  # Disable toolbar navigation
+
+        # Override matplotlib's toolbar mode
+        try:
+            self.viz_canvas.toolbar = None
+        except:
+            pass
+
         # Store all axes for easy iteration
         self.viz_axes = {
             'top': self.viz_ax_top,
@@ -452,8 +467,12 @@ class AsgardEnhanced(QMainWindow):
         self.viz_canvas.mpl_connect('button_release_event', self.on_viz_mouse_release)
         self.viz_canvas.mpl_connect('motion_notify_event', self.on_viz_mouse_motion)
         self.viz_canvas.mpl_connect('scroll_event', self.on_viz_scroll)
+        self.viz_canvas.mpl_connect('key_press_event', self.on_viz_key_press)
 
         layout.addWidget(self.viz_canvas)
+
+        # Make sure canvas can receive keyboard events
+        self.viz_canvas.setFocusPolicy(Qt.StrongFocus)
 
         # Initialize the plot
         self.update_3d_visualization()
@@ -1248,13 +1267,27 @@ class AsgardEnhanced(QMainWindow):
 
     def on_viz_mouse_motion(self, event):
         """Handle mouse motion in 3D visualization"""
+        # CRITICAL DEBUG: Log ALL motion events briefly
+        if not hasattr(self, '_motion_event_count'):
+            self._motion_event_count = 0
+        self._motion_event_count += 1
+
+        # Log every 100th motion to show we're getting events
+        if self._motion_event_count % 100 == 1:
+            self.log_console(f"💡 INFO: Received {self._motion_event_count} motion events total")
+
         if not self.viz_dragging:
+            # Motion while NOT dragging - this is normal
             return
 
+        self.log_console(f"✓✓✓ DRAG MOTION EVENT #{self.viz_drag_counter} ✓✓✓")
+
         if event.inaxes not in self.viz_axes.values():
+            self.log_console(f"⚠ Motion event but cursor left viewport")
             return
 
         if event.xdata is None or event.ydata is None:
+            self.log_console(f"⚠ Motion event but xdata/ydata is None")
             return
 
         # Calculate movement deltas (increase sensitivity)
@@ -1264,7 +1297,7 @@ class AsgardEnhanced(QMainWindow):
         # Debug output every 10 motion events
         self.viz_drag_counter += 1
         if self.viz_drag_counter == 1:
-            self.log_console(f"✓ Mouse motion detected! dx={dx:.2f}, dy={dy:.2f}")
+            self.log_console(f"✓✓✓ FIRST DRAG MOTION! dx={dx:.2f}, dy={dy:.2f} ✓✓✓")
 
         # Increased sensitivity for better responsiveness
         sensitivity = 2.0
@@ -1385,6 +1418,73 @@ class AsgardEnhanced(QMainWindow):
                 self.update_3d_visualization()
             else:
                 self.log_console(f"✗ Scroll failed: {ik_result.reason}")
+
+    def on_viz_key_press(self, event):
+        """Handle keyboard control of end effector"""
+        if not self.viz_interactive_mode.isChecked():
+            return
+
+        # Get current end effector position
+        current_angles = {joint_id: ctrl['spinbox'].value()
+                         for joint_id, ctrl in self.joint_controls.items()}
+        end_pos, _ = self.kinematics.forward_kinematics(current_angles)
+
+        # Set target position to current
+        target_pos = [end_pos.x, end_pos.y, end_pos.z]
+
+        # Movement step size
+        step = 10  # mm
+
+        # Update target based on key
+        moved = False
+        if event.key == 'left':
+            target_pos[0] -= step
+            moved = True
+            self.log_console(f"← Keyboard: X-{step}mm")
+        elif event.key == 'right':
+            target_pos[0] += step
+            moved = True
+            self.log_console(f"→ Keyboard: X+{step}mm")
+        elif event.key == 'up':
+            target_pos[1] += step
+            moved = True
+            self.log_console(f"↑ Keyboard: Y+{step}mm")
+        elif event.key == 'down':
+            target_pos[1] -= step
+            moved = True
+            self.log_console(f"↓ Keyboard: Y-{step}mm")
+        elif event.key == 'pageup':
+            target_pos[2] += step
+            moved = True
+            self.log_console(f"⤴ Keyboard: Z+{step}mm")
+        elif event.key == 'pagedown':
+            target_pos[2] -= step
+            moved = True
+            self.log_console(f"⤵ Keyboard: Z-{step}mm")
+
+        if moved:
+            # Clamp to workspace
+            target_pos[0] = max(-600, min(600, target_pos[0]))
+            target_pos[1] = max(-600, min(600, target_pos[1]))
+            target_pos[2] = max(0, min(600, target_pos[2]))
+
+            # Calculate IK
+            from kinematics import Point3D
+            target = Point3D(x=target_pos[0], y=target_pos[1], z=target_pos[2])
+
+            ik_result = self.kinematics.inverse_kinematics(target, current_angles)
+
+            if ik_result.success:
+                # Update joint controls
+                for joint_id, angle in ik_result.angles.items():
+                    if joint_id in self.joint_controls:
+                        self.joint_controls[joint_id]['slider'].setValue(int(angle))
+                        self.joint_controls[joint_id]['spinbox'].setValue(angle)
+
+                self.viz_target_pos = target_pos
+                self.update_3d_visualization()
+            else:
+                self.log_console(f"✗ Keyboard move failed: {ik_result.reason}")
 
     # Kinect methods
 
