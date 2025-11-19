@@ -128,6 +128,7 @@ class AsgardEnhanced(QMainWindow):
         # Current state
         self.current_kinect_frame = None
         self.detected_objects_3d = []
+        self.ik_solution: Optional[Dict[str, float]] = None
 
         # Load configuration
         self.config = get_config()
@@ -262,6 +263,63 @@ class AsgardEnhanced(QMainWindow):
         actions_layout.addStretch()
 
         layout.addWidget(actions_group)
+
+        # IK Positioning
+        ik_group = QGroupBox("Inverse Kinematics Positioning")
+        ik_layout = QGridLayout(ik_group)
+
+        # Target position inputs
+        ik_layout.addWidget(QLabel("Target Position (mm):"), 0, 0)
+
+        ik_layout.addWidget(QLabel("X:"), 1, 0)
+        self.ik_x_spin = QDoubleSpinBox()
+        self.ik_x_spin.setMinimum(-1000)
+        self.ik_x_spin.setMaximum(1000)
+        self.ik_x_spin.setValue(200)
+        self.ik_x_spin.setSuffix(" mm")
+        ik_layout.addWidget(self.ik_x_spin, 1, 1)
+
+        ik_layout.addWidget(QLabel("Y:"), 1, 2)
+        self.ik_y_spin = QDoubleSpinBox()
+        self.ik_y_spin.setMinimum(-1000)
+        self.ik_y_spin.setMaximum(1000)
+        self.ik_y_spin.setValue(0)
+        self.ik_y_spin.setSuffix(" mm")
+        ik_layout.addWidget(self.ik_y_spin, 1, 3)
+
+        ik_layout.addWidget(QLabel("Z:"), 1, 4)
+        self.ik_z_spin = QDoubleSpinBox()
+        self.ik_z_spin.setMinimum(0)
+        self.ik_z_spin.setMaximum(1000)
+        self.ik_z_spin.setValue(200)
+        self.ik_z_spin.setSuffix(" mm")
+        ik_layout.addWidget(self.ik_z_spin, 1, 5)
+
+        # Buttons
+        self.ik_check_btn = QPushButton("Check Reachability")
+        self.ik_check_btn.clicked.connect(self.check_ik_reachability)
+        ik_layout.addWidget(self.ik_check_btn, 2, 0, 1, 2)
+
+        self.ik_calculate_btn = QPushButton("Calculate IK")
+        self.ik_calculate_btn.clicked.connect(self.calculate_ik_solution)
+        ik_layout.addWidget(self.ik_calculate_btn, 2, 2, 1, 2)
+
+        self.ik_move_btn = QPushButton("Move to Position")
+        self.ik_move_btn.clicked.connect(self.move_to_ik_position)
+        self.ik_move_btn.setEnabled(False)
+        ik_layout.addWidget(self.ik_move_btn, 2, 4, 1, 2)
+
+        # Status and solution display
+        self.ik_status_label = QLabel("Status: Ready")
+        ik_layout.addWidget(self.ik_status_label, 3, 0, 1, 6)
+
+        self.ik_solution_text = QTextEdit()
+        self.ik_solution_text.setReadOnly(True)
+        self.ik_solution_text.setMaximumHeight(80)
+        self.ik_solution_text.setPlaceholderText("IK solution will appear here...")
+        ik_layout.addWidget(self.ik_solution_text, 4, 0, 1, 6)
+
+        layout.addWidget(ik_group)
 
         # Console
         console_group = QGroupBox("Console")
@@ -653,6 +711,118 @@ class AsgardEnhanced(QMainWindow):
             self.robot.send_command(command)
             self.log_console(f">>> {command}")
             self.console_input.clear()
+
+    def check_ik_reachability(self):
+        """Check if target position is reachable"""
+        from kinematics import Point3D
+
+        target = Point3D(
+            x=self.ik_x_spin.value(),
+            y=self.ik_y_spin.value(),
+            z=self.ik_z_spin.value()
+        )
+
+        if self.kinematics.is_reachable(target):
+            self.ik_status_label.setText(f"✓ Position ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) is REACHABLE")
+            self.ik_status_label.setStyleSheet("color: green;")
+            self.log_console(f"IK Check: Position is reachable")
+        else:
+            self.ik_status_label.setText(f"✗ Position ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) is OUT OF REACH")
+            self.ik_status_label.setStyleSheet("color: red;")
+            self.log_console(f"IK Check: Position is out of reach")
+
+        # Show workspace bounds
+        bounds = self.kinematics.get_workspace_bounds()
+        bounds_text = f"Workspace: X[{bounds['x'][0]:.0f}, {bounds['x'][1]:.0f}] "
+        bounds_text += f"Y[{bounds['y'][0]:.0f}, {bounds['y'][1]:.0f}] "
+        bounds_text += f"Z[{bounds['z'][0]:.0f}, {bounds['z'][1]:.0f}] mm"
+        self.ik_solution_text.setPlainText(bounds_text)
+
+    def calculate_ik_solution(self):
+        """Calculate IK solution for target position"""
+        from kinematics import Point3D
+
+        target = Point3D(
+            x=self.ik_x_spin.value(),
+            y=self.ik_y_spin.value(),
+            z=self.ik_z_spin.value()
+        )
+
+        # Check reachability first
+        if not self.kinematics.is_reachable(target):
+            self.ik_status_label.setText("✗ Cannot calculate: Position is out of reach")
+            self.ik_status_label.setStyleSheet("color: red;")
+            self.ik_move_btn.setEnabled(False)
+            return
+
+        # Get current joint angles as starting point
+        current_angles = {joint_id: ctrl['spinbox'].value()
+                         for joint_id, ctrl in self.joint_controls.items()}
+
+        # Calculate IK
+        self.ik_status_label.setText("Calculating IK solution...")
+        self.ik_status_label.setStyleSheet("color: blue;")
+
+        self.ik_solution = self.kinematics.inverse_kinematics(target, current_angles)
+
+        if self.ik_solution:
+            # Verify solution with forward kinematics
+            end_pos, _ = self.kinematics.forward_kinematics(self.ik_solution)
+            error_x = abs(end_pos.x - target.x)
+            error_y = abs(end_pos.y - target.y)
+            error_z = abs(end_pos.z - target.z)
+            total_error = (error_x**2 + error_y**2 + error_z**2)**0.5
+
+            # Display solution
+            solution_text = f"IK Solution Found (error: {total_error:.2f} mm):\n\n"
+            for joint_id in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z']:
+                if joint_id in self.ik_solution:
+                    solution_text += f"{joint_id}: {self.ik_solution[joint_id]:6.1f}°\n"
+
+            solution_text += f"\nVerification:\n"
+            solution_text += f"Target:  ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})\n"
+            solution_text += f"Reached: ({end_pos.x:.1f}, {end_pos.y:.1f}, {end_pos.z:.1f})"
+
+            self.ik_solution_text.setPlainText(solution_text)
+            self.ik_status_label.setText(f"✓ Solution found with {total_error:.2f} mm error")
+            self.ik_status_label.setStyleSheet("color: green;")
+            self.ik_move_btn.setEnabled(True)
+            self.log_console(f"IK Solution calculated for ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})")
+        else:
+            self.ik_solution_text.setPlainText("No solution found. Try adjusting the target position.")
+            self.ik_status_label.setText("✗ IK solver failed to converge")
+            self.ik_status_label.setStyleSheet("color: red;")
+            self.ik_move_btn.setEnabled(False)
+            self.log_console("IK calculation failed")
+
+    def move_to_ik_position(self):
+        """Move robot to calculated IK position"""
+        from kinematics import Point3D
+
+        if not self.robot.is_connected():
+            QMessageBox.warning(self, "Not Connected", "Please connect to robot first")
+            return
+
+        if not self.ik_solution:
+            QMessageBox.warning(self, "No Solution", "Please calculate IK solution first")
+            return
+
+        # Move each joint to calculated angle
+        for joint_id, angle in self.ik_solution.items():
+            if joint_id in self.joint_controls:
+                self.robot.move_joint(joint_id, angle)
+                # Update UI
+                self.joint_controls[joint_id]['slider'].setValue(int(angle))
+                self.joint_controls[joint_id]['spinbox'].setValue(angle)
+
+        target = Point3D(
+            x=self.ik_x_spin.value(),
+            y=self.ik_y_spin.value(),
+            z=self.ik_z_spin.value()
+        )
+        self.log_console(f"Moving to position ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})")
+        self.ik_status_label.setText("✓ Movement commands sent")
+        self.ik_status_label.setStyleSheet("color: green;")
 
     # Kinect methods
 
