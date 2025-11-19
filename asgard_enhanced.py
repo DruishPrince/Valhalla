@@ -43,6 +43,7 @@ from sensor_gateway_client import SensorGatewayClient, GatewayConfig
 from sensor_integration import SensorIntegration
 from action_sequencer import ActionSequencer
 from kinematics import ThorKinematics, IKResult
+from plugin_manager import PluginManager
 from config_manager import (
     get_config, get_serial_config, get_kinect_config,
     get_sensor_gateway_config, get_board_config
@@ -440,6 +441,7 @@ class AsgardEnhanced(QMainWindow):
         self.sensor_integration: Optional[SensorIntegration] = None
         self.sequencer = ActionSequencer(self.robot)
         self.kinematics = ThorKinematics()
+        self.plugin_manager = PluginManager()
 
         # Current state
         self.current_kinect_frame = None
@@ -458,6 +460,10 @@ class AsgardEnhanced(QMainWindow):
 
         # Build UI
         self.init_ui()
+
+        # Load plugins (after UI is built so plugins can add tabs/widgets)
+        self.plugin_manager.load_all_plugins(self)
+        self.load_plugin_tabs()  # Add tabs from plugins with UI
 
         # Setup update timers
         self.status_timer = QTimer()
@@ -486,6 +492,7 @@ class AsgardEnhanced(QMainWindow):
         self.tabs.addTab(self.create_sensors_tab(), "Sensors")
         self.tabs.addTab(self.create_sequencer_tab(), "Action Sequencer")
         self.tabs.addTab(self.create_config_tab(), "Configuration")
+        self.tabs.addTab(self.create_plugins_tab(), "Plugins")
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -1149,6 +1156,183 @@ class AsgardEnhanced(QMainWindow):
         layout.addLayout(reload_layout)
 
         return tab
+
+    def create_plugins_tab(self) -> QWidget:
+        """Create plugins management tab"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Header
+        header = QLabel("<h2>Plugin Manager</h2>")
+        layout.addWidget(header)
+
+        desc = QLabel(
+            "Plugins extend the functionality of Asgard Enhanced. "
+            "Enable/disable plugins below, or create your own plugins in the 'plugins/' directory."
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        # Plugin list group
+        plugins_group = QGroupBox("Loaded Plugins")
+        plugins_layout = QVBoxLayout(plugins_group)
+
+        # This will be populated with plugin controls
+        self.plugin_controls_layout = QVBoxLayout()
+        plugins_layout.addLayout(self.plugin_controls_layout)
+
+        # Refresh plugins list
+        self.refresh_plugin_list()
+
+        plugins_layout.addStretch()
+        layout.addWidget(plugins_group)
+
+        # Reload button
+        reload_layout = QHBoxLayout()
+        reload_plugins_btn = QPushButton("Reload All Plugins")
+        reload_plugins_btn.clicked.connect(self.reload_all_plugins)
+        reload_layout.addWidget(reload_plugins_btn)
+
+        open_plugins_dir_btn = QPushButton("Open Plugins Folder")
+        open_plugins_dir_btn.clicked.connect(self.open_plugins_directory)
+        reload_layout.addWidget(open_plugins_dir_btn)
+
+        reload_layout.addStretch()
+        layout.addLayout(reload_layout)
+
+        # Info section
+        info_group = QGroupBox("Plugin Development")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel(
+            "<b>Want to create your own plugins?</b><br>"
+            "See <tt>PLUGIN_DEVELOPMENT.md</tt> for a complete guide.<br><br>"
+            "<b>Quick start:</b><br>"
+            "1. Create a Python file in the <tt>plugins/</tt> directory<br>"
+            "2. Inherit from <tt>Plugin</tt> or <tt>VisionPlugin</tt> base class<br>"
+            "3. Implement the <tt>initialize()</tt> method<br>"
+            "4. Optional: implement <tt>create_widget()</tt> for custom UI<br>"
+            "5. Restart Asgard Enhanced or click 'Reload All Plugins'"
+        )
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        return tab
+
+    def refresh_plugin_list(self):
+        """Refresh the list of plugins in the UI"""
+        # Clear existing controls
+        while self.plugin_controls_layout.count():
+            child = self.plugin_controls_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Add controls for each loaded plugin
+        plugins = self.plugin_manager.get_all_plugins()
+
+        if not plugins:
+            no_plugins_label = QLabel("<i>No plugins loaded. Add plugins to the 'plugins/' directory.</i>")
+            no_plugins_label.setStyleSheet("color: gray;")
+            self.plugin_controls_layout.addWidget(no_plugins_label)
+            return
+
+        for plugin_name, plugin in plugins.items():
+            # Create a widget for each plugin
+            plugin_widget = QWidget()
+            plugin_layout = QHBoxLayout(plugin_widget)
+            plugin_layout.setContentsMargins(5, 5, 5, 5)
+
+            # Plugin info
+            metadata = plugin.get_metadata()
+            name_label = QLabel(f"<b>{metadata.name}</b> v{metadata.version}")
+            plugin_layout.addWidget(name_label)
+
+            desc_label = QLabel(f"- {metadata.description}")
+            desc_label.setStyleSheet("color: gray;")
+            plugin_layout.addWidget(desc_label, 1)  # Stretch factor 1
+
+            # Enable/Disable checkbox
+            enable_check = QCheckBox("Enabled")
+            enable_check.setChecked(plugin.enabled)
+            enable_check.toggled.connect(
+                lambda checked, p=plugin_name: self.toggle_plugin(p, checked)
+            )
+            plugin_layout.addWidget(enable_check)
+
+            # Add to layout
+            self.plugin_controls_layout.addWidget(plugin_widget)
+
+    def toggle_plugin(self, plugin_name: str, enabled: bool):
+        """Enable/disable a plugin"""
+        if enabled:
+            self.plugin_manager.enable_plugin(plugin_name)
+            self.log_console(f"✓ Enabled plugin: {plugin_name}")
+        else:
+            self.plugin_manager.disable_plugin(plugin_name)
+            self.log_console(f"⊗ Disabled plugin: {plugin_name}")
+
+    def reload_all_plugins(self):
+        """Reload all plugins"""
+        self.log_console("Reloading all plugins...")
+
+        # Shutdown existing plugins
+        self.plugin_manager.shutdown_all()
+
+        # Reload
+        self.plugin_manager.load_all_plugins(self)
+
+        # Refresh UI
+        self.refresh_plugin_list()
+
+        # Add plugin tabs
+        self.load_plugin_tabs()
+
+        self.log_console("✓ Plugins reloaded")
+
+    def load_plugin_tabs(self):
+        """Load tabs from plugins that have UI"""
+        plugins_with_ui = self.plugin_manager.get_plugins_with_ui()
+
+        for plugin_name, plugin in plugins_with_ui.items():
+            widget = plugin.create_widget()
+            if widget:
+                # Check if tab already exists
+                tab_title = f"🔌 {plugin.get_metadata().name}"
+                tab_exists = False
+                for i in range(self.tabs.count()):
+                    if self.tabs.tabText(i) == tab_title:
+                        tab_exists = True
+                        break
+
+                if not tab_exists:
+                    self.tabs.addTab(widget, tab_title)
+
+    def open_plugins_directory(self):
+        """Open the plugins directory in file explorer"""
+        import os
+        import subprocess
+        import platform
+
+        plugins_path = os.path.abspath("plugins")
+
+        # Create directory if it doesn't exist
+        os.makedirs(plugins_path, exist_ok=True)
+
+        # Open in file explorer based on OS
+        system = platform.system()
+        try:
+            if system == "Windows":
+                os.startfile(plugins_path)
+            elif system == "Darwin":  # macOS
+                subprocess.Popen(["open", plugins_path])
+            else:  # Linux
+                subprocess.Popen(["xdg-open", plugins_path])
+
+            self.log_console(f"Opened plugins directory: {plugins_path}")
+        except Exception as e:
+            self.log_console(f"Could not open plugins directory: {e}")
 
     # Connection methods
 
