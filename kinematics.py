@@ -33,6 +33,16 @@ class Point3D:
         return cls(float(arr[0]), float(arr[1]), float(arr[2]))
 
 
+@dataclass
+class IKResult:
+    """Result from inverse kinematics calculation"""
+    success: bool                        # True if solution found
+    angles: Optional[Dict[str, float]]   # Joint angles (None if failed)
+    error: float                         # Position error in mm
+    reason: str                          # Human-readable explanation
+    is_approximate: bool = False         # True if "close enough" but not exact
+
+
 class ThorKinematics:
     """
     Forward and Inverse Kinematics for Thor 6-axis arm
@@ -181,28 +191,33 @@ class ThorKinematics:
 
     def inverse_kinematics(self,
                           target: Point3D,
-                          current_angles: Optional[Dict[str, float]] = None) -> Optional[Dict[str, float]]:
+                          current_angles: Optional[Dict[str, float]] = None,
+                          tolerance: float = 1.0,
+                          approx_tolerance: float = 10.0) -> IKResult:
         """
         Calculate joint angles to reach target position (numerical solver)
 
         Args:
             target: Target 3D position
             current_angles: Starting joint angles (uses current if None)
+            tolerance: Exact solution tolerance (mm) - default 1.0mm
+            approx_tolerance: "Close enough" tolerance (mm) - default 10.0mm
 
         Returns:
-            Dictionary of joint angles or None if unreachable
+            IKResult object with solution and diagnostic information
         """
         if current_angles is None:
             current_angles = self.joint_angles.copy()
 
         # Use numerical IK solver (Jacobian-based)
-        return self._numerical_ik(target, current_angles)
+        return self._numerical_ik(target, current_angles, tolerance=tolerance, approx_tolerance=approx_tolerance)
 
     def _numerical_ik(self,
                      target: Point3D,
                      initial_angles: Dict[str, float],
                      max_iterations: int = 100,
-                     tolerance: float = 1.0) -> Optional[Dict[str, float]]:
+                     tolerance: float = 1.0,
+                     approx_tolerance: float = 10.0) -> IKResult:
         """
         Numerical inverse kinematics using Jacobian method
 
@@ -210,17 +225,35 @@ class ThorKinematics:
             target: Target position
             initial_angles: Starting joint angles
             max_iterations: Maximum solver iterations
-            tolerance: Position error tolerance (mm)
+            tolerance: Exact solution tolerance (mm)
+            approx_tolerance: "Close enough" tolerance (mm)
 
         Returns:
-            Joint angles or None if failed
+            IKResult with solution and diagnostics
         """
+        # Check if target is within workspace bounds first
+        if not self.is_reachable(target):
+            workspace = self.get_workspace_bounds()
+            max_reach = workspace['x'][1]
+            target_dist = np.sqrt(target.x**2 + target.y**2 + target.z**2)
+
+            return IKResult(
+                success=False,
+                angles=None,
+                error=target_dist - max_reach if target_dist > max_reach else 0,
+                reason=f"Target beyond workspace (distance: {target_dist:.1f}mm, max reach: {max_reach:.1f}mm)",
+                is_approximate=False
+            )
+
         # Start with initial guess
         angles = initial_angles.copy()
 
         # Only solve for first 3 joints (base, shoulder, elbow) for simplicity
         # Wrist orientation is kept neutral
         joint_keys = ['A', 'B', 'D']
+
+        best_angles = angles.copy()
+        best_error = float('inf')
 
         for iteration in range(max_iterations):
             # Calculate current position
@@ -235,9 +268,30 @@ class ThorKinematics:
 
             error_magnitude = np.linalg.norm(error)
 
-            # Check if we're close enough
+            # Track best solution
+            if error_magnitude < best_error:
+                best_error = error_magnitude
+                best_angles = angles.copy()
+
+            # Check if we have exact solution
             if error_magnitude < tolerance:
-                return angles
+                return IKResult(
+                    success=True,
+                    angles=angles,
+                    error=error_magnitude,
+                    reason=f"Exact solution (error: {error_magnitude:.2f}mm)",
+                    is_approximate=False
+                )
+
+            # Check if we have "close enough" solution
+            if error_magnitude < approx_tolerance:
+                return IKResult(
+                    success=True,
+                    angles=angles,
+                    error=error_magnitude,
+                    reason=f"Approximate solution (error: {error_magnitude:.2f}mm, within {approx_tolerance:.0f}mm tolerance)",
+                    is_approximate=True
+                )
 
             # Calculate Jacobian (numerical approximation)
             J = self._calculate_jacobian(angles, joint_keys)
@@ -263,8 +317,24 @@ class ThorKinematics:
                 elif key in ['B', 'D']:
                     angles[key] = np.clip(angles[key], -90, 90)
 
-        # Failed to converge - caller will handle the error
-        return None
+        # Failed to converge within tolerances - return best effort if it's reasonable
+        if best_error < approx_tolerance * 2:  # Within 2x approx tolerance
+            return IKResult(
+                success=True,
+                angles=best_angles,
+                error=best_error,
+                reason=f"Best effort solution (error: {best_error:.2f}mm, solver did not fully converge)",
+                is_approximate=True
+            )
+
+        # Completely failed
+        return IKResult(
+            success=False,
+            angles=None,
+            error=best_error,
+            reason=f"IK solver failed to converge (best error: {best_error:.1f}mm, exceeded {approx_tolerance*2:.0f}mm limit)",
+            is_approximate=False
+        )
 
     def _calculate_jacobian(self, angles: Dict[str, float], joint_keys: List[str]) -> np.ndarray:
         """

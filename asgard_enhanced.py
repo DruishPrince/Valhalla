@@ -42,7 +42,7 @@ from vision_controller_3d import VisionController3D
 from sensor_gateway_client import SensorGatewayClient, GatewayConfig
 from sensor_integration import SensorIntegration
 from action_sequencer import ActionSequencer
-from kinematics import ThorKinematics
+from kinematics import ThorKinematics, IKResult
 from config_manager import (
     get_config, get_serial_config, get_kinect_config,
     get_sensor_gateway_config, get_board_config
@@ -983,37 +983,52 @@ class AsgardEnhanced(QMainWindow):
         self.ik_status_label.setText("Calculating IK solution...")
         self.ik_status_label.setStyleSheet("color: blue;")
 
-        self.ik_solution = self.kinematics.inverse_kinematics(target, current_angles)
+        ik_result = self.kinematics.inverse_kinematics(target, current_angles)
 
-        if self.ik_solution:
+        if ik_result.success:
+            # Store solution
+            self.ik_solution = ik_result.angles
+
             # Verify solution with forward kinematics
-            end_pos, _ = self.kinematics.forward_kinematics(self.ik_solution)
-            error_x = abs(end_pos.x - target.x)
-            error_y = abs(end_pos.y - target.y)
-            error_z = abs(end_pos.z - target.z)
-            total_error = (error_x**2 + error_y**2 + error_z**2)**0.5
+            end_pos, _ = self.kinematics.forward_kinematics(ik_result.angles)
 
             # Display solution
-            solution_text = f"IK Solution Found (error: {total_error:.2f} mm):\n\n"
+            solution_text = ""
+            if ik_result.is_approximate:
+                solution_text += "⚠ APPROXIMATE SOLUTION ⚠\n"
+            else:
+                solution_text += "✓ EXACT SOLUTION\n"
+
+            solution_text += f"\n{ik_result.reason}\n\n"
+            solution_text += "Joint Angles:\n"
             for joint_id in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z']:
-                if joint_id in self.ik_solution:
-                    solution_text += f"{joint_id}: {self.ik_solution[joint_id]:6.1f}°\n"
+                if joint_id in ik_result.angles:
+                    solution_text += f"{joint_id}: {ik_result.angles[joint_id]:6.1f}°\n"
 
             solution_text += f"\nVerification:\n"
             solution_text += f"Target:  ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})\n"
-            solution_text += f"Reached: ({end_pos.x:.1f}, {end_pos.y:.1f}, {end_pos.z:.1f})"
+            solution_text += f"Reached: ({end_pos.x:.1f}, {end_pos.y:.1f}, {end_pos.z:.1f})\n"
+            solution_text += f"Error:   {ik_result.error:.2f} mm"
 
             self.ik_solution_text.setPlainText(solution_text)
-            self.ik_status_label.setText(f"✓ Solution found with {total_error:.2f} mm error")
-            self.ik_status_label.setStyleSheet("color: green;")
+
+            if ik_result.is_approximate:
+                self.ik_status_label.setText(f"⚠ Approximate solution: {ik_result.error:.2f} mm error")
+                self.ik_status_label.setStyleSheet("color: orange;")
+            else:
+                self.ik_status_label.setText(f"✓ Exact solution: {ik_result.error:.2f} mm error")
+                self.ik_status_label.setStyleSheet("color: green;")
+
             self.ik_move_btn.setEnabled(True)
-            self.log_console(f"IK Solution calculated for ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})")
+            self.log_console(f"IK: {ik_result.reason}")
         else:
-            self.ik_solution_text.setPlainText("No solution found. Try adjusting the target position.")
-            self.ik_status_label.setText("✗ IK solver failed to converge")
+            # Failed - show why
+            self.ik_solution = None
+            self.ik_solution_text.setPlainText(f"❌ IK FAILED\n\n{ik_result.reason}\n\nError: {ik_result.error:.1f} mm")
+            self.ik_status_label.setText(f"✗ {ik_result.reason}")
             self.ik_status_label.setStyleSheet("color: red;")
             self.ik_move_btn.setEnabled(False)
-            self.log_console("IK calculation failed")
+            self.log_console(f"IK Failed: {ik_result.reason}")
 
     def move_to_ik_position(self):
         """Move robot to calculated IK position"""
@@ -1211,18 +1226,21 @@ class AsgardEnhanced(QMainWindow):
                 # Calculate IK
                 current_angles = {joint_id: ctrl['spinbox'].value()
                                  for joint_id, ctrl in self.joint_controls.items()}
-                solution = self.kinematics.inverse_kinematics(target, current_angles)
+                ik_result = self.kinematics.inverse_kinematics(target, current_angles)
 
-                if solution:
+                if ik_result.success:
                     # Update joint controls
-                    for joint_id, angle in solution.items():
+                    for joint_id, angle in ik_result.angles.items():
                         if joint_id in self.joint_controls:
                             self.joint_controls[joint_id]['slider'].setValue(int(angle))
                             self.joint_controls[joint_id]['spinbox'].setValue(angle)
 
-                    self.log_console(f"Moved to ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) via IK")
+                    if ik_result.is_approximate:
+                        self.log_console(f"✓ Drag: {ik_result.reason}")
+                    else:
+                        self.log_console(f"✓ Moved to ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) - {ik_result.reason}")
                 else:
-                    self.log_console("IK failed to converge for drag target")
+                    self.log_console(f"✗ Drag failed: {ik_result.reason}")
 
             # Re-enable auto-update
             self.viz_auto_update.setChecked(True)
@@ -1293,11 +1311,11 @@ class AsgardEnhanced(QMainWindow):
         current_angles = {joint_id: ctrl['spinbox'].value()
                          for joint_id, ctrl in self.joint_controls.items()}
 
-        solution = self.kinematics.inverse_kinematics(target, current_angles)
+        ik_result = self.kinematics.inverse_kinematics(target, current_angles)
 
-        if solution:
+        if ik_result.success:
             # Update joint controls temporarily (without triggering moves)
-            for joint_id, angle in solution.items():
+            for joint_id, angle in ik_result.angles.items():
                 if joint_id in self.joint_controls:
                     self.joint_controls[joint_id]['spinbox'].blockSignals(True)
                     self.joint_controls[joint_id]['slider'].blockSignals(True)
@@ -1309,8 +1327,9 @@ class AsgardEnhanced(QMainWindow):
             # Log position periodically (every 10th drag event)
             self.viz_drag_counter += 1
             if self.viz_drag_counter % 10 == 0:
+                status_prefix = "~" if ik_result.is_approximate else ""
                 self.viz_info_label.setText(
-                    f"Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm"
+                    f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
                 )
 
             # Update visualization
@@ -1319,7 +1338,7 @@ class AsgardEnhanced(QMainWindow):
             # IK failed - log it occasionally
             self.viz_drag_counter += 1
             if self.viz_drag_counter % 20 == 0:
-                self.log_console(f"IK failed for target ({target.x:.0f}, {target.y:.0f}, {target.z:.0f}) - out of reach?")
+                self.log_console(f"✗ Drag IK failed: {ik_result.reason}")
 
     def on_viz_scroll(self, event):
         """Handle mouse scroll in 3D visualization"""
@@ -1352,17 +1371,20 @@ class AsgardEnhanced(QMainWindow):
 
             current_angles = {joint_id: ctrl['spinbox'].value()
                              for joint_id, ctrl in self.joint_controls.items()}
-            solution = self.kinematics.inverse_kinematics(target, current_angles)
+            ik_result = self.kinematics.inverse_kinematics(target, current_angles)
 
-            if solution:
+            if ik_result.success:
                 # Update joint controls
-                for joint_id, angle in solution.items():
+                for joint_id, angle in ik_result.angles.items():
                     if joint_id in self.joint_controls:
                         self.joint_controls[joint_id]['slider'].setValue(int(angle))
                         self.joint_controls[joint_id]['spinbox'].setValue(angle)
 
-                self.log_console(f"Scroll: Z={self.viz_target_pos[2]:.1f} mm")
+                status = "~" if ik_result.is_approximate else "✓"
+                self.log_console(f"{status} Scroll: Z={self.viz_target_pos[2]:.1f} mm (error: {ik_result.error:.1f}mm)")
                 self.update_3d_visualization()
+            else:
+                self.log_console(f"✗ Scroll failed: {ik_result.reason}")
 
     # Kinect methods
 
