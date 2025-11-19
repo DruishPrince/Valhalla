@@ -136,6 +136,11 @@ class AsgardEnhanced(QMainWindow):
         self.detected_objects_3d = []
         self.ik_solution: Optional[Dict[str, float]] = None
 
+        # 3D visualizer interaction state
+        self.viz_dragging = False
+        self.viz_drag_start = None
+        self.viz_target_pos = None
+
         # Load configuration
         self.config = get_config()
 
@@ -365,6 +370,10 @@ class AsgardEnhanced(QMainWindow):
         controls_group = QGroupBox("Visualization Controls")
         controls_layout = QHBoxLayout(controls_group)
 
+        self.viz_interactive_mode = QCheckBox("Interactive Mode (drag end effector)")
+        self.viz_interactive_mode.setChecked(True)
+        controls_layout.addWidget(self.viz_interactive_mode)
+
         self.viz_auto_update = QCheckBox("Auto-update from joint controls")
         self.viz_auto_update.setChecked(True)
         controls_layout.addWidget(self.viz_auto_update)
@@ -374,8 +383,8 @@ class AsgardEnhanced(QMainWindow):
         self.viz_show_workspace.toggled.connect(self.update_3d_visualization)
         controls_layout.addWidget(self.viz_show_workspace)
 
-        self.viz_show_target = QCheckBox("Show IK target")
-        self.viz_show_target.setChecked(True)
+        self.viz_show_target = QCheckBox("Show target marker")
+        self.viz_show_target.setChecked(False)
         self.viz_show_target.toggled.connect(self.update_3d_visualization)
         controls_layout.addWidget(self.viz_show_target)
 
@@ -404,6 +413,12 @@ class AsgardEnhanced(QMainWindow):
         self.viz_figure = Figure(figsize=(8, 8))
         self.viz_canvas = FigureCanvas(self.viz_figure)
         self.viz_ax = self.viz_figure.add_subplot(111, projection='3d')
+
+        # Connect mouse events for interactive manipulation
+        self.viz_canvas.mpl_connect('button_press_event', self.on_viz_mouse_press)
+        self.viz_canvas.mpl_connect('button_release_event', self.on_viz_mouse_release)
+        self.viz_canvas.mpl_connect('motion_notify_event', self.on_viz_mouse_motion)
+        self.viz_canvas.mpl_connect('scroll_event', self.on_viz_scroll)
 
         layout.addWidget(self.viz_canvas)
 
@@ -1040,14 +1055,11 @@ class AsgardEnhanced(QMainWindow):
                            c='orange', s=200, marker='^',
                            label='End Effector', edgecolors='black', linewidths=2)
 
-        # Show IK target if enabled and available
-        if self.viz_show_target.isChecked() and self.ik_solution:
-            target_x = self.ik_x_spin.value()
-            target_y = self.ik_y_spin.value()
-            target_z = self.ik_z_spin.value()
-            self.viz_ax.scatter([target_x], [target_y], [target_z],
+        # Show drag target if enabled and available
+        if self.viz_show_target.isChecked() and self.viz_target_pos:
+            self.viz_ax.scatter([self.viz_target_pos[0]], [self.viz_target_pos[1]], [self.viz_target_pos[2]],
                                c='cyan', s=150, marker='*',
-                               label='IK Target', edgecolors='black', linewidths=1)
+                               label='Drag Target', edgecolors='black', linewidths=1)
 
         # Show workspace bounds if enabled
         if self.viz_show_workspace.isChecked():
@@ -1094,6 +1106,153 @@ class AsgardEnhanced(QMainWindow):
         """Reset 3D view to default angle"""
         self.viz_ax.view_init(elev=20, azim=45)
         self.viz_canvas.draw()
+
+    def on_viz_mouse_press(self, event):
+        """Handle mouse press in 3D visualization"""
+        if not self.viz_interactive_mode.isChecked():
+            return
+
+        # Middle mouse button to start dragging
+        if event.button == 2 and event.inaxes == self.viz_ax:
+            # Get current end effector position
+            current_angles = {joint_id: ctrl['spinbox'].value()
+                             for joint_id, ctrl in self.joint_controls.items()}
+            end_pos, _ = self.kinematics.forward_kinematics(current_angles)
+
+            self.viz_dragging = True
+            self.viz_drag_start = (event.xdata, event.ydata)
+            self.viz_target_pos = [end_pos.x, end_pos.y, end_pos.z]
+
+            # Temporarily disable auto-update to avoid conflicts
+            self.viz_auto_update.setChecked(False)
+
+            self.log_console("Interactive mode: Dragging end effector")
+
+    def on_viz_mouse_release(self, event):
+        """Handle mouse release in 3D visualization"""
+        if event.button == 2 and self.viz_dragging:
+            self.viz_dragging = False
+            self.viz_drag_start = None
+
+            # Calculate IK for final position if we have a target
+            if self.viz_target_pos:
+                from kinematics import Point3D
+                target = Point3D(
+                    x=self.viz_target_pos[0],
+                    y=self.viz_target_pos[1],
+                    z=self.viz_target_pos[2]
+                )
+
+                # Calculate IK
+                current_angles = {joint_id: ctrl['spinbox'].value()
+                                 for joint_id, ctrl in self.joint_controls.items()}
+                solution = self.kinematics.inverse_kinematics(target, current_angles)
+
+                if solution:
+                    # Update joint controls
+                    for joint_id, angle in solution.items():
+                        if joint_id in self.joint_controls:
+                            self.joint_controls[joint_id]['slider'].setValue(int(angle))
+                            self.joint_controls[joint_id]['spinbox'].setValue(angle)
+
+                    self.log_console(f"Moved to ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) via IK")
+                else:
+                    self.log_console("IK failed to converge for drag target")
+
+            # Re-enable auto-update
+            self.viz_auto_update.setChecked(True)
+            self.update_3d_visualization()
+
+    def on_viz_mouse_motion(self, event):
+        """Handle mouse motion in 3D visualization"""
+        if not self.viz_dragging or not event.inaxes == self.viz_ax:
+            return
+
+        if event.xdata is None or event.ydata is None:
+            return
+
+        # Calculate movement in 3D space
+        # This is an approximation - we move in the XY plane of the view
+        dx = (event.xdata - self.viz_drag_start[0])
+        dy = (event.ydata - self.viz_drag_start[1])
+
+        # Update target position (simple XY drag)
+        self.viz_target_pos[0] += dx * 0.5
+        self.viz_target_pos[1] += dy * 0.5
+
+        # Update drag start for next delta
+        self.viz_drag_start = (event.xdata, event.ydata)
+
+        # Calculate IK for preview
+        from kinematics import Point3D
+        target = Point3D(
+            x=self.viz_target_pos[0],
+            y=self.viz_target_pos[1],
+            z=self.viz_target_pos[2]
+        )
+
+        # Get current angles for IK starting point
+        current_angles = {joint_id: ctrl['spinbox'].value()
+                         for joint_id, ctrl in self.joint_controls.items()}
+
+        solution = self.kinematics.inverse_kinematics(target, current_angles)
+
+        if solution:
+            # Update joint controls temporarily (without triggering moves)
+            for joint_id, angle in solution.items():
+                if joint_id in self.joint_controls:
+                    self.joint_controls[joint_id]['spinbox'].blockSignals(True)
+                    self.joint_controls[joint_id]['slider'].blockSignals(True)
+                    self.joint_controls[joint_id]['slider'].setValue(int(angle))
+                    self.joint_controls[joint_id]['spinbox'].setValue(angle)
+                    self.joint_controls[joint_id]['spinbox'].blockSignals(False)
+                    self.joint_controls[joint_id]['slider'].blockSignals(False)
+
+            # Update visualization
+            self.update_3d_visualization()
+
+    def on_viz_scroll(self, event):
+        """Handle mouse scroll in 3D visualization"""
+        if not self.viz_interactive_mode.isChecked():
+            return
+
+        # Scroll to move Z-axis (up/down)
+        if event.inaxes == self.viz_ax and self.viz_target_pos:
+            # Get current end effector position if not dragging
+            if not self.viz_dragging:
+                current_angles = {joint_id: ctrl['spinbox'].value()
+                                 for joint_id, ctrl in self.joint_controls.items()}
+                end_pos, _ = self.kinematics.forward_kinematics(current_angles)
+                self.viz_target_pos = [end_pos.x, end_pos.y, end_pos.z]
+
+            # Scroll up = increase Z, scroll down = decrease Z
+            dz = 10 if event.step > 0 else -10
+            self.viz_target_pos[2] += dz
+
+            # Clamp Z to reasonable range
+            self.viz_target_pos[2] = max(0, min(600, self.viz_target_pos[2]))
+
+            # Calculate IK
+            from kinematics import Point3D
+            target = Point3D(
+                x=self.viz_target_pos[0],
+                y=self.viz_target_pos[1],
+                z=self.viz_target_pos[2]
+            )
+
+            current_angles = {joint_id: ctrl['spinbox'].value()
+                             for joint_id, ctrl in self.joint_controls.items()}
+            solution = self.kinematics.inverse_kinematics(target, current_angles)
+
+            if solution:
+                # Update joint controls
+                for joint_id, angle in solution.items():
+                    if joint_id in self.joint_controls:
+                        self.joint_controls[joint_id]['slider'].setValue(int(angle))
+                        self.joint_controls[joint_id]['spinbox'].setValue(angle)
+
+                self.log_console(f"Scroll: Z={self.viz_target_pos[2]:.1f} mm")
+                self.update_3d_visualization()
 
     # Kinect methods
 
