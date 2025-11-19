@@ -17,28 +17,33 @@ Asgard is an enhanced Graphical User Interface (GUI) and control system for [Tho
 - **Modular Robot Controller** - Clean API for programmatic robot control
 - **Action Sequencer** - Record, save, load, and playback action sequences
 - **Computer Vision Integration** - OpenCV-based object detection and tracking
+- **3D Visualization & Control** - Interactive 3D viewer with drag-to-position interface
+- **Forward/Inverse Kinematics** - Complete kinematics solver with numerical IK
+- **Path Planning** - Smooth trajectory generation with multiple interpolation methods
 - **Coordinate Transformation** - Convert between camera and robot coordinate systems
 - **Vision-Guided Control** - Trigger actions based on visual detection
 - **Pre-defined Sequences** - Built-in pick-and-place and custom sequences
 - **Comprehensive Examples** - Ready-to-use code for common tasks
 
 ### Planned Features
-- **Inverse Kinematics** (2nd version) - *Coming soon*
-- **3D Visualization** - Real-time 3D robot display
-- **3D IK Controller** - Interactive 3D manipulation
+- **Analytical IK Solver** - Faster analytical inverse kinematics
+- **Collision Detection** - Self-collision and workspace obstacle avoidance
+- **Force Control** - Compliant motion and force feedback
 
-## What's New in Version 2.0
+## What's New in Version 2.1
 
 🎉 **Major Enhancements for Robotics Developers!**
 
 - 🤖 **Modular Python API** - Control your robot programmatically with clean, documented APIs
 - 📹 **Computer Vision Integration** - Built-in OpenCV support for visual object detection
 - 🎬 **Action Recorder** - Record, save, and replay robot movements
+- 🎮 **3D Interactive Control** - NEW! Visualize and control robot in 3D space
+- 🧮 **Kinematics Solver** - NEW! Forward and inverse kinematics with numerical solver
 - 🗺️ **Path Planning** - Generate smooth, interpolated trajectories
 - ⚙️ **Configuration System** - Centralized settings management
 - 🚀 **Quick Start Wizard** - Interactive setup for new users
 - 📷 **Calibration Tools** - Easy camera-to-robot coordinate calibration
-- 📚 **Comprehensive Examples** - 6 interactive examples to get you started
+- 📚 **Comprehensive Examples** - Multiple interactive examples to get you started
 
 See [CHANGELOG.md](CHANGELOG.md) for complete details.
 
@@ -219,9 +224,13 @@ Available examples:
 | Task | Command |
 |------|---------|
 | Run GUI | `python asgard.py` |
+| **3D Interactive Control** | `python robot_3d_control.py` |
+| **3D Viewer (standalone)** | `python viewer_3d.py` |
+| **3D Examples** | `python example_3d_control.py` |
 | Quick setup wizard | `python quickstart.py` |
 | Interactive examples | `python examples.py` |
 | Calibrate camera | `python calibrate_camera.py` |
+| Test kinematics | `python kinematics.py` |
 | Test configuration | `python config_manager.py` |
 | Test path planning | `python path_planner.py` |
 
@@ -232,11 +241,15 @@ Available examples:
 | `robot_controller.py` | Core robot control API |
 | `action_sequencer.py` | Record/playback sequences |
 | `vision_controller.py` | Computer vision integration |
+| **`kinematics.py`** | **Forward/inverse kinematics solver** |
+| **`viewer_3d.py`** | **Interactive 3D visualization** |
+| **`robot_3d_control.py`** | **3D control application (PyQt5)** |
 | `path_planner.py` | Smooth path generation |
 | `config_manager.py` | Configuration management |
 | `calibrate_camera.py` | Camera calibration tool |
 | `quickstart.py` | Interactive setup wizard |
 | `examples.py` | Example workflows |
+| **`example_3d_control.py`** | **3D control examples** |
 | `asgard.py` | Original PyQt5 GUI |
 
 ### Configuration Files
@@ -269,7 +282,39 @@ sequencer.stop_recording()
 sequencer.save_sequence('my_task.json')
 ```
 
-**3. Vision-Based Automation:**
+**3. 3D Visualization and Control:**
+```python
+from viewer_3d import create_interactive_viewer
+from kinematics import Point3D
+
+# Create 3D viewer with sliders
+viewer = create_interactive_viewer(use_sliders=True)
+
+# Set target position (inverse kinematics)
+target = Point3D(200, 100, 200)  # X, Y, Z in mm
+viewer.set_target(target)
+
+# Display interactive viewer
+viewer.show()
+```
+
+**4. Inverse Kinematics:**
+```python
+from kinematics import ThorKinematics, Point3D
+
+kin = ThorKinematics()
+
+# Target position in 3D space
+target = Point3D(x=200, y=100, z=200)
+
+# Solve for joint angles
+if kin.is_reachable(target):
+    angles = kin.inverse_kinematics(target)
+    print(f"Solution: {angles}")
+    # Send to robot...
+```
+
+**5. Vision-Based Automation:**
 ```python
 from vision_controller import VisionController
 

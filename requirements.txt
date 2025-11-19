@@ -9,6 +9,9 @@ opencv-python>=4.5.0
 opencv-contrib-python>=4.5.0
 numpy>=1.21.0
 
+# 3D Visualization
+matplotlib>=3.3.0
+
 # Optional: For advanced vision features
 # scikit-image>=0.18.0
 # pillow>=8.0.0
