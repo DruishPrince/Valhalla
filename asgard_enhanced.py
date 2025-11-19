@@ -123,6 +123,66 @@ class VisualizerEventFilter(QObject):
         self.last_x = 0
         self.last_y = 0
         self.drag_viewport = None
+        self.dragging_joint = None  # Which joint index is being dragged (None = end effector)
+
+    def find_nearest_joint(self, mouse_x, mouse_y, viewport):
+        """
+        Find which joint marker is nearest to the mouse click.
+        Returns joint index (0=base, 1-5=joints, None=none close enough)
+        """
+        # Get current joint positions
+        current_angles = {joint_id: ctrl['spinbox'].value()
+                         for joint_id, ctrl in self.gui.joint_controls.items()}
+        end_pos, joint_positions = self.gui.kinematics.forward_kinematics(current_angles)
+
+        # Convert mouse position to normalized canvas coordinates (0-1)
+        canvas_width = self.gui.viz_canvas.width()
+        canvas_height = self.gui.viz_canvas.height()
+
+        # Get which quadrant we're in
+        if mouse_y < canvas_height / 2:  # Top half
+            quadrant_y = 0
+            quadrant_x = 0 if mouse_x < canvas_width / 2 else 1
+        else:  # Bottom half
+            quadrant_y = 1
+            quadrant_x = 0 if mouse_x < canvas_width / 2 else 1
+
+        # Calculate relative position within the quadrant
+        quadrant_mouse_x = (mouse_x % (canvas_width / 2)) / (canvas_width / 2)
+        quadrant_mouse_y = (mouse_y % (canvas_height / 2)) / (canvas_height / 2)
+
+        # Project joint positions to 2D based on viewport
+        # This is a simplified projection - a full solution would use the actual matplotlib transform
+        min_dist = float('inf')
+        nearest_joint = None
+        click_threshold = 0.15  # Threshold in normalized coords (0-1) - more forgiving
+
+        for i, joint_pos in enumerate(joint_positions):
+            # Project to 2D based on viewport
+            if viewport == 'top':
+                # XY plane
+                proj_x = (joint_pos.x + 600) / 1200  # Normalize to 0-1
+                proj_y = 1.0 - (joint_pos.y + 600) / 1200  # Flip Y
+            elif viewport == 'front':
+                # XZ plane
+                proj_x = (joint_pos.x + 600) / 1200
+                proj_y = 1.0 - joint_pos.z / 600
+            elif viewport == 'side':
+                # YZ plane
+                proj_x = (joint_pos.y + 600) / 1200
+                proj_y = 1.0 - joint_pos.z / 600
+            else:  # perspective - use approximate XY
+                proj_x = (joint_pos.x + 600) / 1200
+                proj_y = 1.0 - (joint_pos.y + 600) / 1200
+
+            # Calculate distance
+            dist = ((proj_x - quadrant_mouse_x)**2 + (proj_y - quadrant_mouse_y)**2)**0.5
+
+            if dist < min_dist and dist < click_threshold:
+                min_dist = dist
+                nearest_joint = i
+
+        return nearest_joint
 
     def eventFilter(self, obj, event):
         """Filter Qt mouse events on the canvas"""
@@ -166,11 +226,19 @@ class VisualizerEventFilter(QObject):
                     else:  # Right
                         self.drag_viewport = 'persp'
 
+                # Detect which joint (if any) is being clicked
+                self.dragging_joint = self.find_nearest_joint(event.x(), event.y(), self.drag_viewport)
+
                 # Disable auto-update temporarily
                 self.gui.viz_auto_update.setChecked(False)
 
                 view_label = self.drag_viewport.upper() if self.drag_viewport else "UNKNOWN"
-                self.gui.log_console(f"✓ DRAG STARTED in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
+                if self.dragging_joint is not None:
+                    joint_names = ['Base', 'Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'End Effector']
+                    joint_name = joint_names[self.dragging_joint] if self.dragging_joint < len(joint_names) else f'Joint {self.dragging_joint}'
+                    self.gui.log_console(f"✓ DRAGGING {joint_name} in {view_label} view")
+                else:
+                    self.gui.log_console(f"✓ DRAG STARTED in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
 
                 return True  # Consume event to prevent matplotlib from seeing it
 
@@ -179,8 +247,8 @@ class VisualizerEventFilter(QObject):
             if event.button() == Qt.MiddleButton and self.dragging:
                 self.dragging = False
 
-                # Calculate IK for final position
-                if self.gui.viz_target_pos:
+                # Only calculate IK if we were dragging end effector (not a specific joint)
+                if self.dragging_joint is None and self.gui.viz_target_pos:
                     from kinematics import Point3D
                     target = Point3D(
                         x=self.gui.viz_target_pos[0],
@@ -208,6 +276,7 @@ class VisualizerEventFilter(QObject):
                 self.gui.update_3d_visualization()
 
                 self.drag_viewport = None
+                self.dragging_joint = None
                 return True  # Consume event
 
         # Mouse motion - update drag position
@@ -220,66 +289,112 @@ class VisualizerEventFilter(QObject):
                 self.last_x = event.x()
                 self.last_y = event.y()
 
-                # Convert pixel delta to world space delta
-                # Scale factor: ~0.5mm per pixel (adjust as needed)
-                scale = 0.8
-                world_dx = dx * scale
-                world_dy = -dy * scale  # Invert Y (Qt Y goes down, world Y goes up)
+                # Handle dragging a specific joint vs. end effector differently
+                if self.dragging_joint is not None:
+                    # Dragging a specific joint - directly control that joint's angle
+                    # Map joint index to joint ID
+                    joint_ids = ['A', 'B', 'D', 'X', 'Y', 'Z']
 
-                # Update target position based on viewport
-                if self.drag_viewport == 'top':
-                    # Top view: drag in XY plane
-                    self.gui.viz_target_pos[0] += world_dx  # X
-                    self.gui.viz_target_pos[1] += world_dy  # Y
-                elif self.drag_viewport == 'front':
-                    # Front view: drag in XZ plane
-                    self.gui.viz_target_pos[0] += world_dx  # X
-                    self.gui.viz_target_pos[2] += world_dy  # Z
-                elif self.drag_viewport == 'side':
-                    # Side view: drag in YZ plane
-                    self.gui.viz_target_pos[1] += world_dx  # Y
-                    self.gui.viz_target_pos[2] += world_dy  # Z
-                else:  # perspective
-                    # Perspective: drag in XY plane
-                    self.gui.viz_target_pos[0] += world_dx  # X
-                    self.gui.viz_target_pos[1] += world_dy  # Y
+                    # For base joint (index 0), we can control the base rotation (A)
+                    # For other joints, map appropriately
+                    if self.dragging_joint == 0:
+                        # Base - control A joint (rotation around Z)
+                        joint_to_control = 'A'
+                        angle_delta = dx * 0.5  # Horizontal movement controls rotation
+                    elif self.dragging_joint < len(joint_ids):
+                        # Other joints - map to B, D, X, Y, Z
+                        joint_to_control = joint_ids[min(self.dragging_joint, len(joint_ids) - 1)]
+                        # Use combined dx and dy for more intuitive control
+                        angle_delta = (dx - dy) * 0.5  # 0.5 degrees per pixel
+                    else:
+                        joint_to_control = None
+                        angle_delta = 0
 
-                # Clamp to workspace
-                self.gui.viz_target_pos[0] = max(-600, min(600, self.gui.viz_target_pos[0]))
-                self.gui.viz_target_pos[1] = max(-600, min(600, self.gui.viz_target_pos[1]))
-                self.gui.viz_target_pos[2] = max(0, min(600, self.gui.viz_target_pos[2]))
+                    if joint_to_control and joint_to_control in self.gui.joint_controls:
+                        # Get current angle
+                        current_angle = self.gui.joint_controls[joint_to_control]['spinbox'].value()
+                        new_angle = current_angle + angle_delta
 
-                # Calculate IK for preview
-                from kinematics import Point3D
-                target = Point3D(
-                    x=self.gui.viz_target_pos[0],
-                    y=self.gui.viz_target_pos[1],
-                    z=self.gui.viz_target_pos[2]
-                )
+                        # Clamp to limits
+                        new_angle = max(-180, min(180, new_angle))
 
-                current_angles = {joint_id: ctrl['spinbox'].value()
-                                 for joint_id, ctrl in self.gui.joint_controls.items()}
-                ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
+                        # Update the joint control
+                        self.gui.joint_controls[joint_to_control]['spinbox'].blockSignals(True)
+                        self.gui.joint_controls[joint_to_control]['slider'].blockSignals(True)
+                        self.gui.joint_controls[joint_to_control]['slider'].setValue(int(new_angle))
+                        self.gui.joint_controls[joint_to_control]['spinbox'].setValue(new_angle)
+                        self.gui.joint_controls[joint_to_control]['spinbox'].blockSignals(False)
+                        self.gui.joint_controls[joint_to_control]['slider'].blockSignals(False)
 
-                if ik_result.success:
-                    # Update joint controls without triggering moves
-                    for joint_id, angle in ik_result.angles.items():
-                        if joint_id in self.gui.joint_controls:
-                            self.gui.joint_controls[joint_id]['spinbox'].blockSignals(True)
-                            self.gui.joint_controls[joint_id]['slider'].blockSignals(True)
-                            self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
-                            self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
-                            self.gui.joint_controls[joint_id]['spinbox'].blockSignals(False)
-                            self.gui.joint_controls[joint_id]['slider'].blockSignals(False)
+                        # Update info label
+                        self.gui.viz_info_label.setText(
+                            f"Dragging Joint {joint_to_control}: {new_angle:.1f}°"
+                        )
 
-                    # Update info label
-                    status_prefix = "~" if ik_result.is_approximate else ""
-                    self.gui.viz_info_label.setText(
-                        f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
+                        # Update visualization
+                        self.gui.update_3d_visualization()
+
+                else:
+                    # Dragging end effector - use IK
+                    # Convert pixel delta to world space delta
+                    scale = 0.8
+                    world_dx = dx * scale
+                    world_dy = -dy * scale  # Invert Y (Qt Y goes down, world Y goes up)
+
+                    # Update target position based on viewport
+                    if self.drag_viewport == 'top':
+                        # Top view: drag in XY plane
+                        self.gui.viz_target_pos[0] += world_dx  # X
+                        self.gui.viz_target_pos[1] += world_dy  # Y
+                    elif self.drag_viewport == 'front':
+                        # Front view: drag in XZ plane
+                        self.gui.viz_target_pos[0] += world_dx  # X
+                        self.gui.viz_target_pos[2] += world_dy  # Z
+                    elif self.drag_viewport == 'side':
+                        # Side view: drag in YZ plane
+                        self.gui.viz_target_pos[1] += world_dx  # Y
+                        self.gui.viz_target_pos[2] += world_dy  # Z
+                    else:  # perspective
+                        # Perspective: drag in XY plane
+                        self.gui.viz_target_pos[0] += world_dx  # X
+                        self.gui.viz_target_pos[1] += world_dy  # Y
+
+                    # Clamp to workspace
+                    self.gui.viz_target_pos[0] = max(-600, min(600, self.gui.viz_target_pos[0]))
+                    self.gui.viz_target_pos[1] = max(-600, min(600, self.gui.viz_target_pos[1]))
+                    self.gui.viz_target_pos[2] = max(0, min(600, self.gui.viz_target_pos[2]))
+
+                    # Calculate IK for preview
+                    from kinematics import Point3D
+                    target = Point3D(
+                        x=self.gui.viz_target_pos[0],
+                        y=self.gui.viz_target_pos[1],
+                        z=self.gui.viz_target_pos[2]
                     )
 
-                    # Update visualization
-                    self.gui.update_3d_visualization()
+                    current_angles = {joint_id: ctrl['spinbox'].value()
+                                     for joint_id, ctrl in self.gui.joint_controls.items()}
+                    ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
+
+                    if ik_result.success:
+                        # Update joint controls without triggering moves
+                        for joint_id, angle in ik_result.angles.items():
+                            if joint_id in self.gui.joint_controls:
+                                self.gui.joint_controls[joint_id]['spinbox'].blockSignals(True)
+                                self.gui.joint_controls[joint_id]['slider'].blockSignals(True)
+                                self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
+                                self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
+                                self.gui.joint_controls[joint_id]['spinbox'].blockSignals(False)
+                                self.gui.joint_controls[joint_id]['slider'].blockSignals(False)
+
+                        # Update info label
+                        status_prefix = "~" if ik_result.is_approximate else ""
+                        self.gui.viz_info_label.setText(
+                            f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
+                        )
+
+                        # Update visualization
+                        self.gui.update_3d_visualization()
 
                 return True  # Consume event
 
@@ -1347,20 +1462,32 @@ class AsgardEnhanced(QMainWindow):
         for view_name, ax in self.viz_axes.items():
             ax.clear()
 
-            # Plot the arm links
+            # Plot the arm links (just lines, no markers on the line itself)
             ax.plot(x_coords, y_coords, z_coords,
-                   'b-', linewidth=2, marker='o', markersize=6,
-                   markerfacecolor='red', markeredgecolor='black', markeredgewidth=1)
+                   'b-', linewidth=3, alpha=0.7)
 
-            # Highlight base
+            # Draw large, clickable joint markers
+            # Skip first (base) and last (end effector) as they get special markers
+            if len(joint_positions) > 2:
+                mid_joints_x = x_coords[1:-1]
+                mid_joints_y = y_coords[1:-1]
+                mid_joints_z = z_coords[1:-1]
+                ax.scatter(mid_joints_x, mid_joints_y, mid_joints_z,
+                          c='red', s=250, marker='o', alpha=0.9,
+                          edgecolors='darkred', linewidths=2.5,
+                          label='Joints', picker=True, pickradius=10)
+
+            # Highlight base (larger and distinct)
             ax.scatter([0], [0], [0],
-                      c='green', s=150, marker='s',
-                      edgecolors='black', linewidths=2)
+                      c='green', s=300, marker='s', alpha=0.9,
+                      edgecolors='darkgreen', linewidths=2.5,
+                      label='Base')
 
-            # Highlight end effector
+            # Highlight end effector (larger and distinct)
             ax.scatter([end_pos.x], [end_pos.y], [end_pos.z],
-                      c='orange', s=150, marker='^',
-                      edgecolors='black', linewidths=2)
+                      c='orange', s=300, marker='^', alpha=0.9,
+                      edgecolors='darkorange', linewidths=2.5,
+                      label='End Effector', picker=True, pickradius=10)
 
             # Show drag target if enabled OR currently dragging
             if self.viz_target_pos and (self.viz_show_target.isChecked() or self.viz_dragging):
