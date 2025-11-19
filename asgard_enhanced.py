@@ -140,6 +140,7 @@ class AsgardEnhanced(QMainWindow):
         self.viz_dragging = False
         self.viz_drag_start = None
         self.viz_target_pos = None
+        self.viz_drag_viewport = None  # Which viewport we're dragging in
 
         # Load configuration
         self.config = get_config()
@@ -409,10 +410,37 @@ class AsgardEnhanced(QMainWindow):
 
         layout.addWidget(info_group)
 
-        # Matplotlib 3D canvas
-        self.viz_figure = Figure(figsize=(8, 8))
+        # Matplotlib quad view canvas (like 3D Studio Max)
+        self.viz_figure = Figure(figsize=(12, 10))
         self.viz_canvas = FigureCanvas(self.viz_figure)
-        self.viz_ax = self.viz_figure.add_subplot(111, projection='3d')
+
+        # Create 2x2 grid of subplots
+        # Top-left: Top view (XY plane)
+        self.viz_ax_top = self.viz_figure.add_subplot(221, projection='3d')
+        self.viz_ax_top.set_title('TOP VIEW (XY)', fontweight='bold', fontsize=10)
+
+        # Top-right: Front view (XZ plane)
+        self.viz_ax_front = self.viz_figure.add_subplot(222, projection='3d')
+        self.viz_ax_front.set_title('FRONT VIEW (XZ)', fontweight='bold', fontsize=10)
+
+        # Bottom-left: Side view (YZ plane)
+        self.viz_ax_side = self.viz_figure.add_subplot(223, projection='3d')
+        self.viz_ax_side.set_title('SIDE VIEW (YZ)', fontweight='bold', fontsize=10)
+
+        # Bottom-right: Perspective view
+        self.viz_ax_persp = self.viz_figure.add_subplot(224, projection='3d')
+        self.viz_ax_persp.set_title('PERSPECTIVE', fontweight='bold', fontsize=10)
+
+        # Store all axes for easy iteration
+        self.viz_axes = {
+            'top': self.viz_ax_top,
+            'front': self.viz_ax_front,
+            'side': self.viz_ax_side,
+            'persp': self.viz_ax_persp
+        }
+
+        # Adjust spacing
+        self.viz_figure.tight_layout(pad=2.0)
 
         # Connect mouse events for interactive manipulation
         self.viz_canvas.mpl_connect('button_press_event', self.on_viz_mouse_press)
@@ -1024,7 +1052,7 @@ class AsgardEnhanced(QMainWindow):
             self.update_3d_visualization()
 
     def update_3d_visualization(self):
-        """Update 3D arm visualization"""
+        """Update quad view visualization (Top, Front, Side, Perspective)"""
         # Get current joint angles from UI
         current_angles = {joint_id: ctrl['spinbox'].value()
                          for joint_id, ctrl in self.joint_controls.items()}
@@ -1032,66 +1060,72 @@ class AsgardEnhanced(QMainWindow):
         # Calculate forward kinematics to get joint positions
         end_pos, joint_positions = self.kinematics.forward_kinematics(current_angles)
 
-        # Clear the plot
-        self.viz_ax.clear()
-
         # Extract coordinates for plotting
         x_coords = [p.x for p in joint_positions]
         y_coords = [p.y for p in joint_positions]
         z_coords = [p.z for p in joint_positions]
 
-        # Plot the arm links
-        self.viz_ax.plot(x_coords, y_coords, z_coords,
-                        'b-', linewidth=3, marker='o', markersize=8,
-                        label='Arm Links', markerfacecolor='red')
-
-        # Highlight base
-        self.viz_ax.scatter([0], [0], [0],
-                           c='green', s=200, marker='s',
-                           label='Base', edgecolors='black', linewidths=2)
-
-        # Highlight end effector
-        self.viz_ax.scatter([end_pos.x], [end_pos.y], [end_pos.z],
-                           c='orange', s=200, marker='^',
-                           label='End Effector', edgecolors='black', linewidths=2)
-
-        # Show drag target if enabled and available
-        if self.viz_show_target.isChecked() and self.viz_target_pos:
-            self.viz_ax.scatter([self.viz_target_pos[0]], [self.viz_target_pos[1]], [self.viz_target_pos[2]],
-                               c='cyan', s=150, marker='*',
-                               label='Drag Target', edgecolors='black', linewidths=1)
-
-        # Show workspace bounds if enabled
-        if self.viz_show_workspace.isChecked():
-            bounds = self.kinematics.get_workspace_bounds()
-            max_reach = bounds['x'][1]
-
-            # Draw workspace sphere (approximate)
-            u = np.linspace(0, 2 * np.pi, 20)
-            v = np.linspace(0, np.pi, 20)
-            x = max_reach * np.outer(np.cos(u), np.sin(v))
-            y = max_reach * np.outer(np.sin(u), np.sin(v))
-            z = max_reach * np.outer(np.ones(np.size(u)), np.cos(v))
-
-            self.viz_ax.plot_surface(x, y, z, alpha=0.1, color='gray')
-
-        # Set labels and title
-        self.viz_ax.set_xlabel('X (mm)', fontsize=10)
-        self.viz_ax.set_ylabel('Y (mm)', fontsize=10)
-        self.viz_ax.set_zlabel('Z (mm)', fontsize=10)
-        self.viz_ax.set_title('Thor Arm - 3D Visualization', fontsize=12, fontweight='bold')
-
-        # Set equal aspect ratio
         max_range = 600  # mm
-        self.viz_ax.set_xlim([-max_range, max_range])
-        self.viz_ax.set_ylim([-max_range, max_range])
-        self.viz_ax.set_zlim([0, max_range])
 
-        # Add grid
-        self.viz_ax.grid(True, alpha=0.3)
+        # Draw each view
+        for view_name, ax in self.viz_axes.items():
+            ax.clear()
 
-        # Add legend
-        self.viz_ax.legend(loc='upper right', fontsize=9)
+            # Plot the arm links
+            ax.plot(x_coords, y_coords, z_coords,
+                   'b-', linewidth=2, marker='o', markersize=6,
+                   markerfacecolor='red', markeredgecolor='black', markeredgewidth=1)
+
+            # Highlight base
+            ax.scatter([0], [0], [0],
+                      c='green', s=150, marker='s',
+                      edgecolors='black', linewidths=2)
+
+            # Highlight end effector
+            ax.scatter([end_pos.x], [end_pos.y], [end_pos.z],
+                      c='orange', s=150, marker='^',
+                      edgecolors='black', linewidths=2)
+
+            # Show drag target if enabled
+            if self.viz_show_target.isChecked() and self.viz_target_pos:
+                ax.scatter([self.viz_target_pos[0]], [self.viz_target_pos[1]], [self.viz_target_pos[2]],
+                          c='cyan', s=100, marker='*',
+                          edgecolors='black', linewidths=1)
+
+            # Set axis limits
+            ax.set_xlim([-max_range, max_range])
+            ax.set_ylim([-max_range, max_range])
+            ax.set_zlim([0, max_range])
+
+            # Set axis labels
+            ax.set_xlabel('X', fontsize=8)
+            ax.set_ylabel('Y', fontsize=8)
+            ax.set_zlabel('Z', fontsize=8)
+
+            # Add grid
+            ax.grid(True, alpha=0.3)
+
+            # Set camera angle for each view (LOCKED)
+            if view_name == 'top':
+                # Top view: Looking down Z-axis
+                ax.view_init(elev=90, azim=-90)
+                ax.set_title('TOP VIEW (XY)', fontweight='bold', fontsize=9)
+            elif view_name == 'front':
+                # Front view: Looking from Y-axis
+                ax.view_init(elev=0, azim=-90)
+                ax.set_title('FRONT VIEW (XZ)', fontweight='bold', fontsize=9)
+            elif view_name == 'side':
+                # Side view: Looking from X-axis
+                ax.view_init(elev=0, azim=0)
+                ax.set_title('SIDE VIEW (YZ)', fontweight='bold', fontsize=9)
+            else:  # perspective
+                # Perspective view
+                ax.view_init(elev=20, azim=45)
+                ax.set_title('PERSPECTIVE', fontweight='bold', fontsize=9)
+
+            # Disable mouse rotation for orthographic views
+            if view_name in ['top', 'front', 'side']:
+                ax.disable_mouse_rotation()
 
         # Update info label
         self.viz_info_label.setText(
@@ -1100,11 +1134,16 @@ class AsgardEnhanced(QMainWindow):
         )
 
         # Redraw canvas
+        self.viz_figure.tight_layout(pad=1.5)
         self.viz_canvas.draw()
 
     def reset_3d_view(self):
-        """Reset 3D view to default angle"""
-        self.viz_ax.view_init(elev=20, azim=45)
+        """Reset all views to default angles"""
+        # Reset each view to its locked orientation
+        self.viz_ax_top.view_init(elev=90, azim=-90)
+        self.viz_ax_front.view_init(elev=0, azim=-90)
+        self.viz_ax_side.view_init(elev=0, azim=0)
+        self.viz_ax_persp.view_init(elev=20, azim=45)
         self.viz_canvas.draw()
 
     def on_viz_mouse_press(self, event):
@@ -1113,7 +1152,7 @@ class AsgardEnhanced(QMainWindow):
             return
 
         # Middle mouse button to start dragging
-        if event.button == 2 and event.inaxes == self.viz_ax:
+        if event.button == 2 and event.inaxes in self.viz_axes.values():
             # Get current end effector position
             current_angles = {joint_id: ctrl['spinbox'].value()
                              for joint_id, ctrl in self.joint_controls.items()}
@@ -1123,16 +1162,24 @@ class AsgardEnhanced(QMainWindow):
             self.viz_drag_start = (event.xdata, event.ydata)
             self.viz_target_pos = [end_pos.x, end_pos.y, end_pos.z]
 
+            # Determine which viewport we're dragging in
+            for view_name, ax in self.viz_axes.items():
+                if event.inaxes == ax:
+                    self.viz_drag_viewport = view_name
+                    break
+
             # Temporarily disable auto-update to avoid conflicts
             self.viz_auto_update.setChecked(False)
 
-            self.log_console("Interactive mode: Dragging end effector")
+            view_label = self.viz_drag_viewport.upper() if self.viz_drag_viewport else "UNKNOWN"
+            self.log_console(f"Interactive mode: Dragging in {view_label} view")
 
     def on_viz_mouse_release(self, event):
         """Handle mouse release in 3D visualization"""
         if event.button == 2 and self.viz_dragging:
             self.viz_dragging = False
             self.viz_drag_start = None
+            self.viz_drag_viewport = None
 
             # Calculate IK for final position if we have a target
             if self.viz_target_pos:
@@ -1165,20 +1212,37 @@ class AsgardEnhanced(QMainWindow):
 
     def on_viz_mouse_motion(self, event):
         """Handle mouse motion in 3D visualization"""
-        if not self.viz_dragging or not event.inaxes == self.viz_ax:
+        if not self.viz_dragging or event.inaxes not in self.viz_axes.values():
             return
 
         if event.xdata is None or event.ydata is None:
             return
 
-        # Calculate movement in 3D space
-        # This is an approximation - we move in the XY plane of the view
+        # Calculate movement deltas
         dx = (event.xdata - self.viz_drag_start[0])
         dy = (event.ydata - self.viz_drag_start[1])
 
-        # Update target position (simple XY drag)
-        self.viz_target_pos[0] += dx * 0.5
-        self.viz_target_pos[1] += dy * 0.5
+        # Update target position based on which viewport we're dragging in
+        # Each viewport has different axes mappings
+        if self.viz_drag_viewport == 'top':
+            # Top view: drag in XY plane (looking down Z)
+            self.viz_target_pos[0] += dx * 0.5  # X
+            self.viz_target_pos[1] += dy * 0.5  # Y
+            # Z stays constant
+        elif self.viz_drag_viewport == 'front':
+            # Front view: drag in XZ plane (looking from Y)
+            self.viz_target_pos[0] += dx * 0.5  # X
+            self.viz_target_pos[2] += dy * 0.5  # Z
+            # Y stays constant
+        elif self.viz_drag_viewport == 'side':
+            # Side view: drag in YZ plane (looking from X)
+            self.viz_target_pos[1] += dx * 0.5  # Y
+            self.viz_target_pos[2] += dy * 0.5  # Z
+            # X stays constant
+        else:  # perspective or default
+            # Perspective: drag in XY plane
+            self.viz_target_pos[0] += dx * 0.5  # X
+            self.viz_target_pos[1] += dy * 0.5  # Y
 
         # Update drag start for next delta
         self.viz_drag_start = (event.xdata, event.ydata)
@@ -1217,7 +1281,7 @@ class AsgardEnhanced(QMainWindow):
             return
 
         # Scroll to move Z-axis (up/down)
-        if event.inaxes == self.viz_ax and self.viz_target_pos:
+        if event.inaxes in self.viz_axes.values():
             # Get current end effector position if not dragging
             if not self.viz_dragging:
                 current_angles = {joint_id: ctrl['spinbox'].value()
