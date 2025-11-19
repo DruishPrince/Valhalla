@@ -19,6 +19,8 @@ Asgard is an enhanced Graphical User Interface (GUI) and control system for [Tho
 - **Computer Vision Integration** - OpenCV-based object detection and tracking
 - **3D Visualization & Control** - Interactive 3D viewer with drag-to-position interface
 - **Forward/Inverse Kinematics** - Complete kinematics solver with numerical IK
+- **ADXL345 Sensor Support** - Real-time joint angle feedback with accelerometer sensors
+- **Closed-Loop Control** - Automatic position correction using sensor feedback
 - **Path Planning** - Smooth trajectory generation with multiple interpolation methods
 - **Coordinate Transformation** - Convert between camera and robot coordinate systems
 - **Vision-Guided Control** - Trigger actions based on visual detection
@@ -30,15 +32,17 @@ Asgard is an enhanced Graphical User Interface (GUI) and control system for [Tho
 - **Collision Detection** - Self-collision and workspace obstacle avoidance
 - **Force Control** - Compliant motion and force feedback
 
-## What's New in Version 2.1
+## What's New in Version 2.2
 
 🎉 **Major Enhancements for Robotics Developers!**
 
 - 🤖 **Modular Python API** - Control your robot programmatically with clean, documented APIs
 - 📹 **Computer Vision Integration** - Built-in OpenCV support for visual object detection
 - 🎬 **Action Recorder** - Record, save, and replay robot movements
-- 🎮 **3D Interactive Control** - NEW! Visualize and control robot in 3D space
-- 🧮 **Kinematics Solver** - NEW! Forward and inverse kinematics with numerical solver
+- 🎮 **3D Interactive Control** - Visualize and control robot in 3D space
+- 🧮 **Kinematics Solver** - Forward and inverse kinematics with numerical solver
+- 📡 **ADXL345 Sensor Support** - NEW! Real-time joint feedback with accelerometers
+- 🔄 **Closed-Loop Control** - NEW! Automatic position correction
 - 🗺️ **Path Planning** - Generate smooth, interpolated trajectories
 - ⚙️ **Configuration System** - Centralized settings management
 - 🚀 **Quick Start Wizard** - Interactive setup for new users
@@ -227,6 +231,8 @@ Available examples:
 | **3D Interactive Control** | `python robot_3d_control.py` |
 | **3D Viewer (standalone)** | `python viewer_3d.py` |
 | **3D Examples** | `python example_3d_control.py` |
+| **Calibrate Sensors** | `python calibrate_sensors.py` |
+| **Sensor Examples** | `python example_sensor_feedback.py` |
 | Quick setup wizard | `python quickstart.py` |
 | Interactive examples | `python examples.py` |
 | Calibrate camera | `python calibrate_camera.py` |
@@ -244,6 +250,9 @@ Available examples:
 | **`kinematics.py`** | **Forward/inverse kinematics solver** |
 | **`viewer_3d.py`** | **Interactive 3D visualization** |
 | **`robot_3d_control.py`** | **3D control application (PyQt5)** |
+| **`adxl345_sensor.py`** | **ADXL345 sensor interface** |
+| **`sensor_manager.py`** | **Multi-sensor management** |
+| **`sensor_integration.py`** | **Sensor feedback integration** |
 | `path_planner.py` | Smooth path generation |
 | `config_manager.py` | Configuration management |
 | `calibrate_camera.py` | Camera calibration tool |

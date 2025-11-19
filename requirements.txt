@@ -12,6 +12,9 @@ numpy>=1.21.0
 # 3D Visualization
 matplotlib>=3.3.0
 
+# Sensor Support (ADXL345 accelerometers via I2C)
+smbus2>=0.4.0
+
 # Optional: For advanced vision features
 # scikit-image>=0.18.0
 # pillow>=8.0.0
