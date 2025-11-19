@@ -557,6 +557,111 @@ class AsgardEnhanced(QMainWindow):
 
         layout.addWidget(board_group)
 
+        # Robot Dimensions Configuration
+        dimensions_group = QGroupBox("Robot Physical Dimensions (for IK)")
+        dimensions_layout = QGridLayout(dimensions_group)
+
+        dimensions_layout.addWidget(QLabel("Measure your robot and input dimensions in millimeters:"), 0, 0, 1, 4)
+
+        # Dimension inputs
+        dim_row = 1
+        self.dim_base_height = QDoubleSpinBox()
+        self.dim_base_height.setRange(0, 500)
+        self.dim_base_height.setSuffix(" mm")
+        self.dim_base_height.setValue(self.kinematics.params['base_height'])
+        dimensions_layout.addWidget(QLabel("Base Height:"), dim_row, 0)
+        dimensions_layout.addWidget(self.dim_base_height, dim_row, 1)
+
+        self.dim_shoulder_offset = QDoubleSpinBox()
+        self.dim_shoulder_offset.setRange(0, 500)
+        self.dim_shoulder_offset.setSuffix(" mm")
+        self.dim_shoulder_offset.setValue(self.kinematics.params['shoulder_offset'])
+        dimensions_layout.addWidget(QLabel("Shoulder Offset:"), dim_row, 2)
+        dimensions_layout.addWidget(self.dim_shoulder_offset, dim_row, 3)
+
+        dim_row += 1
+        self.dim_upper_arm = QDoubleSpinBox()
+        self.dim_upper_arm.setRange(0, 1000)
+        self.dim_upper_arm.setSuffix(" mm")
+        self.dim_upper_arm.setValue(self.kinematics.params['upper_arm'])
+        dimensions_layout.addWidget(QLabel("Upper Arm Length:"), dim_row, 0)
+        dimensions_layout.addWidget(self.dim_upper_arm, dim_row, 1)
+
+        self.dim_forearm = QDoubleSpinBox()
+        self.dim_forearm.setRange(0, 1000)
+        self.dim_forearm.setSuffix(" mm")
+        self.dim_forearm.setValue(self.kinematics.params['forearm'])
+        dimensions_layout.addWidget(QLabel("Forearm Length:"), dim_row, 2)
+        dimensions_layout.addWidget(self.dim_forearm, dim_row, 3)
+
+        dim_row += 1
+        self.dim_wrist_length = QDoubleSpinBox()
+        self.dim_wrist_length.setRange(0, 500)
+        self.dim_wrist_length.setSuffix(" mm")
+        self.dim_wrist_length.setValue(self.kinematics.params['wrist_length'])
+        dimensions_layout.addWidget(QLabel("Wrist to End Effector:"), dim_row, 0)
+        dimensions_layout.addWidget(self.dim_wrist_length, dim_row, 1)
+
+        apply_dims_btn = QPushButton("Apply Dimensions")
+        apply_dims_btn.clicked.connect(self.apply_robot_dimensions)
+        dimensions_layout.addWidget(apply_dims_btn, dim_row, 2, 1, 2)
+
+        layout.addWidget(dimensions_group)
+
+        # Joint Limits Configuration
+        limits_group = QGroupBox("Joint Rotation Limits")
+        limits_layout = QGridLayout(limits_group)
+
+        limits_layout.addWidget(QLabel("Joint"), 0, 0)
+        limits_layout.addWidget(QLabel("Min Angle (°)"), 0, 1)
+        limits_layout.addWidget(QLabel("Max Angle (°)"), 0, 2)
+        limits_layout.addWidget(QLabel("Can Rotate 360°?"), 0, 3)
+
+        self.joint_limit_controls = {}
+        joints_for_limits = [
+            ('A', 'Base Rotation', -180, 180, True),
+            ('B', 'Shoulder', -90, 90, False),
+            ('C', 'Linked (auto)', -90, 90, False),
+            ('D', 'Elbow', -90, 90, False),
+            ('X', 'Wrist Pitch', -90, 90, False),
+            ('Y', 'Wrist Roll', -180, 180, True),
+            ('Z', 'End Effector', -180, 180, True),
+        ]
+
+        for i, (joint_id, joint_name, default_min, default_max, can_full_rotate) in enumerate(joints_for_limits, 1):
+            limits_layout.addWidget(QLabel(f"{joint_id} ({joint_name}):"), i, 0)
+
+            min_spin = QDoubleSpinBox()
+            min_spin.setRange(-360, 360)
+            min_spin.setSuffix("°")
+            min_spin.setValue(default_min)
+            limits_layout.addWidget(min_spin, i, 1)
+
+            max_spin = QDoubleSpinBox()
+            max_spin.setRange(-360, 360)
+            max_spin.setSuffix("°")
+            max_spin.setValue(default_max)
+            limits_layout.addWidget(max_spin, i, 2)
+
+            full_rotate_check = QCheckBox()
+            full_rotate_check.setChecked(can_full_rotate)
+            if can_full_rotate:
+                # If can rotate fully, disable min/max
+                full_rotate_check.toggled.connect(lambda checked, mn=min_spin, mx=max_spin: (mn.setEnabled(not checked), mx.setEnabled(not checked)))
+            limits_layout.addWidget(full_rotate_check, i, 3)
+
+            self.joint_limit_controls[joint_id] = {
+                'min': min_spin,
+                'max': max_spin,
+                'full_rotate': full_rotate_check
+            }
+
+        apply_limits_btn = QPushButton("Apply Joint Limits")
+        apply_limits_btn.clicked.connect(self.apply_joint_limits)
+        limits_layout.addWidget(apply_limits_btn, len(joints_for_limits) + 1, 0, 1, 4)
+
+        layout.addWidget(limits_group)
+
         # Configuration display
         config_text = QTextEdit()
         config_text.setReadOnly(True)
@@ -1023,6 +1128,119 @@ class AsgardEnhanced(QMainWindow):
             if idx >= 0:
                 self.port_combo.setCurrentIndex(idx)
 
+        # Load robot dimensions from config
+        if 'robot_dimensions' in self.config.config:
+            dims = self.config.config['robot_dimensions']
+            if 'base_height' in dims:
+                self.kinematics.params['base_height'] = dims['base_height']
+            if 'shoulder_offset' in dims:
+                self.kinematics.params['shoulder_offset'] = dims['shoulder_offset']
+            if 'upper_arm' in dims:
+                self.kinematics.params['upper_arm'] = dims['upper_arm']
+            if 'forearm' in dims:
+                self.kinematics.params['forearm'] = dims['forearm']
+            if 'wrist_length' in dims:
+                self.kinematics.params['wrist_length'] = dims['wrist_length']
+
+            self.log_console(f"Loaded robot dimensions from config")
+
+        # Load joint limits from config
+        if 'joint_limits' in self.config.config:
+            for joint_id, limits in self.config.config['joint_limits'].items():
+                if joint_id in self.joint_controls:
+                    min_angle = limits.get('min', -180)
+                    max_angle = limits.get('max', 180)
+
+                    slider = self.joint_controls[joint_id]['slider']
+                    spinbox = self.joint_controls[joint_id]['spinbox']
+
+                    slider.setMinimum(int(min_angle))
+                    slider.setMaximum(int(max_angle))
+                    spinbox.setMinimum(min_angle)
+                    spinbox.setMaximum(max_angle)
+
+            self.log_console(f"Loaded joint limits from config")
+
+    def apply_robot_dimensions(self):
+        """Apply robot dimension settings to kinematics"""
+        # Update kinematics parameters
+        self.kinematics.params['base_height'] = self.dim_base_height.value()
+        self.kinematics.params['shoulder_offset'] = self.dim_shoulder_offset.value()
+        self.kinematics.params['upper_arm'] = self.dim_upper_arm.value()
+        self.kinematics.params['forearm'] = self.dim_forearm.value()
+        self.kinematics.params['wrist_length'] = self.dim_wrist_length.value()
+
+        # Save to config
+        if 'robot_dimensions' not in self.config.config:
+            self.config.config['robot_dimensions'] = {}
+
+        self.config.config['robot_dimensions'].update({
+            'base_height': self.dim_base_height.value(),
+            'shoulder_offset': self.dim_shoulder_offset.value(),
+            'upper_arm': self.dim_upper_arm.value(),
+            'forearm': self.dim_forearm.value(),
+            'wrist_length': self.dim_wrist_length.value()
+        })
+        self.config.save()
+
+        # Show workspace update
+        bounds = self.kinematics.get_workspace_bounds()
+        max_reach = bounds['x'][1]
+
+        QMessageBox.information(
+            self,
+            "Dimensions Applied",
+            f"Robot dimensions updated!\n\n"
+            f"Upper Arm: {self.dim_upper_arm.value():.0f} mm\n"
+            f"Forearm: {self.dim_forearm.value():.0f} mm\n"
+            f"Wrist: {self.dim_wrist_length.value():.0f} mm\n\n"
+            f"Maximum Reach: {max_reach:.0f} mm"
+        )
+
+        self.log_console(f"Robot dimensions updated - Max reach: {max_reach:.0f} mm")
+
+    def apply_joint_limits(self):
+        """Apply joint limit settings"""
+        # Store joint limits
+        if 'joint_limits' not in self.config.config:
+            self.config.config['joint_limits'] = {}
+
+        for joint_id, controls in self.joint_limit_controls.items():
+            min_angle = controls['min'].value()
+            max_angle = controls['max'].value()
+            can_full_rotate = controls['full_rotate'].isChecked()
+
+            self.config.config['joint_limits'][joint_id] = {
+                'min': min_angle if not can_full_rotate else -360,
+                'max': max_angle if not can_full_rotate else 360,
+                'full_rotate': can_full_rotate
+            }
+
+            # Update joint control slider ranges
+            if joint_id in self.joint_controls:
+                slider = self.joint_controls[joint_id]['slider']
+                spinbox = self.joint_controls[joint_id]['spinbox']
+
+                actual_min = -360 if can_full_rotate else min_angle
+                actual_max = 360 if can_full_rotate else max_angle
+
+                slider.setMinimum(int(actual_min))
+                slider.setMaximum(int(actual_max))
+                spinbox.setMinimum(actual_min)
+                spinbox.setMaximum(actual_max)
+
+        self.config.save()
+
+        QMessageBox.information(
+            self,
+            "Joint Limits Applied",
+            "Joint rotation limits have been updated!\n\n"
+            "The joint control sliders have been adjusted\n"
+            "to match the new limits."
+        )
+
+        self.log_console("Joint limits updated")
+
     def reload_configuration(self):
         """Reload configuration from file"""
         self.config.load()
@@ -1036,11 +1254,50 @@ class AsgardEnhanced(QMainWindow):
         board_cfg = get_board_config()
 
         summary = "Current Configuration:\n\n"
+        summary += "=" * 50 + "\n"
+        summary += "COMMUNICATION\n"
+        summary += "=" * 50 + "\n"
         summary += f"Serial Port: {serial_cfg.get('port', 'Not set')}\n"
-        summary += f"Baud Rate: {serial_cfg.get('baudrate', 115200)}\n\n"
+        summary += f"Baud Rate: {serial_cfg.get('baudrate', 115200)}\n"
         summary += f"Board: {board_cfg.get('description', 'Generic')}\n\n"
+
+        summary += "=" * 50 + "\n"
+        summary += "ROBOT DIMENSIONS (mm)\n"
+        summary += "=" * 50 + "\n"
+        if 'robot_dimensions' in self.config.config:
+            dims = self.config.config['robot_dimensions']
+            summary += f"Base Height: {dims.get('base_height', 0):.0f}\n"
+            summary += f"Shoulder Offset: {dims.get('shoulder_offset', 0):.0f}\n"
+            summary += f"Upper Arm: {dims.get('upper_arm', 200):.0f}\n"
+            summary += f"Forearm: {dims.get('forearm', 200):.0f}\n"
+            summary += f"Wrist Length: {dims.get('wrist_length', 100):.0f}\n"
+
+            # Calculate and show max reach
+            total = dims.get('upper_arm', 200) + dims.get('forearm', 200) + dims.get('wrist_length', 100)
+            summary += f"\nMaximum Reach: {total:.0f} mm\n"
+        else:
+            summary += "Using default dimensions\n"
+
+        summary += "\n" + "=" * 50 + "\n"
+        summary += "JOINT LIMITS (degrees)\n"
+        summary += "=" * 50 + "\n"
+        if 'joint_limits' in self.config.config:
+            for joint_id in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z']:
+                if joint_id in self.config.config['joint_limits']:
+                    limits = self.config.config['joint_limits'][joint_id]
+                    if limits.get('full_rotate', False):
+                        summary += f"Joint {joint_id}: Full 360° rotation\n"
+                    else:
+                        summary += f"Joint {joint_id}: {limits.get('min', -180):.0f}° to {limits.get('max', 180):.0f}°\n"
+        else:
+            summary += "Using default limits\n"
+
+        summary += "\n" + "=" * 50 + "\n"
+        summary += "SENSORS\n"
+        summary += "=" * 50 + "\n"
         summary += f"Kinect Enabled: {kinect_cfg.get('enabled', False)}\n"
         summary += f"Kinect Version: {kinect_cfg.get('version', 'auto')}\n\n"
+
         summary += f"Config File: {self.config.config_file}\n"
 
         return summary
