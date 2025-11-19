@@ -9,7 +9,408 @@ Complete guide for adding ADXL345 3-axis accelerometer sensors to your Thor robo
 4. [Software Setup](#software-setup)
 5. [Calibration](#calibration)
 6. [Usage Examples](#usage-examples)
-7. [Troubleshooting](#troubleshooting)
+7. [FLY Super ♾️ Pro Board Setup](#fly-super-pro-board-setup)
+8. [Troubleshooting](#troubleshooting)
+
+---
+
+## FLY Super ♾️ Pro Board Setup
+
+### Overview
+
+The **Mellow FLY Super ♾️ Pro** is a high-performance 8-axis controller board designed for 3D printers and CNC machines. However, it doesn't expose I2C pins for direct sensor connection. This guide shows you how to use an external gateway (Raspberry Pi Zero 2W or Pico) to read sensors and transmit data to your main computer.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Main Computer                          │
+│  ┌──────────────────┐         ┌─────────────────────────┐  │
+│  │ Robot Controller │         │ Sensor Gateway Client   │  │
+│  │   (Python)       │         │     (Python)            │  │
+│  └────────┬─────────┘         └──────────┬──────────────┘  │
+│           │                              │                  │
+└───────────┼──────────────────────────────┼──────────────────┘
+            │                              │
+       USB Serial                     USB Serial
+            │                              │
+    ┌───────▼────────────┐         ┌───────▼─────────────────┐
+    │  FLY Super 8 Pro   │         │  Pi Zero 2W / Pico      │
+    │  (Robot Control)   │         │  (Sensor Gateway)       │
+    │  /dev/ttyUSB0      │         │  /dev/ttyUSB1           │
+    └────────────────────┘         └───────┬─────────────────┘
+                                           │
+                                         I2C Bus
+                                           │
+                      ┌────────────────────┼────────────────┐
+                      │                    │                │
+                ┌─────▼─────┐      ┌──────▼──────┐   ┌─────▼─────┐
+                │ ADXL345   │      │  ADXL345    │   │ ADXL345   │
+                │ (Joint A) │      │  (Joint B)  │   │ (Joint D) │
+                │  0x53     │      │   0x1D      │   │  0x53*    │
+                └───────────┘      └─────────────┘   └───────────┘
+                                                      *via I2C mux
+```
+
+### Hardware Options
+
+You have two options for the sensor gateway:
+
+#### Option 1: Raspberry Pi Zero 2W (Recommended)
+**Pros:**
+- Full Linux OS - easier to debug and modify
+- More processing power
+- Can run Python scripts directly
+- Built-in WiFi (can also transmit over network)
+
+**Cons:**
+- More expensive (~$15)
+- Slightly larger
+- Higher power consumption
+
+**Use when:** You want ease of development and debugging
+
+#### Option 2: Raspberry Pi Pico
+**Pros:**
+- Very cheap (~$4)
+- Tiny and low power
+- Dedicated to sensor reading (no OS overhead)
+- Multiple I2C buses (I2C0 and I2C1)
+
+**Cons:**
+- MicroPython environment (more limited)
+- Harder to debug
+- USB serial only (no network)
+
+**Use when:** You want lowest cost and smallest footprint
+
+### Hardware Setup
+
+#### Components Needed
+
+| Item | Quantity | Notes |
+|------|----------|-------|
+| Mellow FLY Super ♾️ Pro | 1 | Your robot controller |
+| Raspberry Pi Zero 2W **or** Pico | 1 | Sensor gateway |
+| ADXL345 breakout boards | 3-6 | One per moving joint |
+| USB cables | 2 | Connect both boards to PC |
+| MicroSD card (Pi Zero only) | 1 | 8GB+ for Raspberry Pi OS Lite |
+| I2C multiplexer (optional) | 1 | TCA9548A for >2 sensors |
+| Jumper wires | ~20 | I2C connections |
+
+### Wiring - Pi Zero 2W Gateway
+
+```
+Raspberry Pi Zero 2W                ADXL345 Sensors
+┌─────────────────────┐
+│  PIN 1  (3.3V) ─────┼───┬─── Sensor 1 VCC (0x53)
+│  PIN 6  (GND)  ─────┼───┼─── Sensor 1 GND
+│  PIN 3  (SDA)  ─────┼───┼─── Sensor 1 SDA
+│  PIN 5  (SCL)  ─────┼───┼─── Sensor 1 SCL
+│                     │   │    Sensor 1 SDO ─── GND
+│                     │   │
+│                     │   ├─── Sensor 2 VCC (0x1D)
+│                     │   ├─── Sensor 2 GND
+│                     │   ├─── Sensor 2 SDA
+│                     │   ├─── Sensor 2 SCL
+│                     │   │    Sensor 2 SDO ─── 3.3V
+│                     │   │
+│  USB Port ──────────┼───┘    (For more sensors, use I2C mux)
+│  (to main PC)       │
+└─────────────────────┘
+```
+
+### Wiring - Pico Gateway
+
+```
+Raspberry Pi Pico                   ADXL345 Sensors
+┌─────────────────────┐
+│  PIN 36 (3V3 OUT)───┼───┬─── Sensor 1 VCC (I2C0, 0x53)
+│  PIN 38 (GND)   ────┼───┼─── Sensor 1 GND
+│  PIN 6  (GP4/SDA0)──┼───┼─── Sensor 1 SDA
+│  PIN 7  (GP5/SCL0)──┼───┼─── Sensor 1 SCL
+│                     │   │    Sensor 1 SDO ─── GND
+│                     │   │
+│  PIN 19 (GP14/SDA1)─┼───┼─── Sensor 2 SDA (I2C1, 0x53)
+│  PIN 20 (GP15/SCL1)─┼───┼─── Sensor 2 SCL
+│                     │   │    Sensor 2 VCC ─── 3.3V
+│                     │   │    Sensor 2 GND ─── GND
+│                     │   │    Sensor 2 SDO ─── GND
+│                     │   │
+│  USB Port ──────────┼───┘    Sensor 3 (I2C0, 0x1D)
+│  (to main PC)       │        Sensor 3 SDO ─── 3.3V
+└─────────────────────┘
+```
+
+**Note:** Pico has 2 I2C buses, allowing up to 4 sensors without multiplexer
+
+### Software Setup - Pi Zero 2W
+
+#### 1. Install Raspberry Pi OS Lite
+
+```bash
+# On your PC, flash Raspberry Pi OS Lite to SD card
+# Use Raspberry Pi Imager: https://www.raspberrypi.com/software/
+
+# Enable SSH and configure WiFi during imaging
+```
+
+#### 2. Enable I2C
+
+```bash
+# SSH into Pi Zero
+ssh pi@raspberrypi.local
+
+# Enable I2C
+sudo raspi-config
+# Navigate to: Interface Options → I2C → Enable
+
+# Reboot
+sudo reboot
+```
+
+#### 3. Install Dependencies
+
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Python dependencies
+sudo apt install python3-pip python3-smbus i2c-tools -y
+
+# Install required Python packages
+pip3 install smbus2 pyserial
+```
+
+#### 4. Test I2C Connection
+
+```bash
+# Scan for I2C devices
+sudo i2cdetect -y 1
+
+# You should see your ADXL345 sensors:
+#      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+# 00:          -- -- -- -- -- -- -- -- -- -- -- -- --
+# 10: -- -- -- -- -- -- -- -- -- -- -- -- -- 1d -- --
+# 20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+# 30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+# 40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+# 50: -- -- -- 53 -- -- -- -- -- -- -- -- -- -- -- --
+```
+
+#### 5. Upload Gateway Script
+
+```bash
+# On your main PC, copy the gateway script to Pi Zero
+scp sensor_gateway_pi.py pi@raspberrypi.local:~/
+
+# SSH into Pi and run
+ssh pi@raspberrypi.local
+python3 sensor_gateway_pi.py --serial /dev/ttyACM0 --baud 115200
+```
+
+#### 6. Configure Auto-Start (Optional)
+
+```bash
+# Create systemd service for auto-start on boot
+sudo nano /etc/systemd/system/sensor-gateway.service
+```
+
+Add:
+```ini
+[Unit]
+Description=ADXL345 Sensor Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+ExecStart=/usr/bin/python3 /home/pi/sensor_gateway_pi.py --serial /dev/ttyACM0
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+```bash
+sudo systemctl enable sensor-gateway.service
+sudo systemctl start sensor-gateway.service
+```
+
+### Software Setup - Pico
+
+#### 1. Install MicroPython
+
+1. Download MicroPython UF2 file: https://micropython.org/download/rp2-pico/
+2. Hold BOOTSEL button on Pico while plugging in USB
+3. Drag UF2 file to RPI-RP2 drive that appears
+4. Pico will reboot with MicroPython installed
+
+#### 2. Upload Gateway Script
+
+Using Thonny IDE (recommended):
+
+```bash
+# Install Thonny
+sudo apt install thonny
+
+# Or download from: https://thonny.org/
+```
+
+1. Open Thonny
+2. Select Interpreter: MicroPython (Raspberry Pi Pico)
+3. Open `sensor_gateway_pico.py`
+4. Save as `main.py` on Pico (File → Save As → Raspberry Pi Pico)
+5. Reset Pico - it will auto-start the gateway
+
+Alternatively, use `mpremote`:
+
+```bash
+# Install mpremote
+pip install mpremote
+
+# Upload script
+mpremote connect /dev/ttyACM0 fs cp sensor_gateway_pico.py :main.py
+
+# Reset Pico
+mpremote reset
+```
+
+### Main Computer Setup
+
+#### 1. Configure FLY Board in Asgard
+
+Edit `asgard_config.json` or use Python:
+
+```python
+from config_manager import set_current_board, get_config
+
+# Set FLY board as current
+set_current_board('fly_super_8_pro')
+
+# Configure sensor gateway
+config = get_config()
+config.set('sensors.enabled', True)
+config.set('sensors.mode', 'gateway')
+config.set('sensors.gateway_type', 'pi_zero')  # or 'pico'
+
+config.set('sensor_gateway.connection_mode', 'serial')
+config.set('sensor_gateway.serial_port', '/dev/ttyUSB1')  # Gateway port
+config.set('sensor_gateway.serial_baudrate', 115200)
+```
+
+#### 2. Test Connection
+
+```bash
+# Run the FLY board example
+python3 example_fly_board_setup.py
+```
+
+Expected output:
+```
+============================================================
+FLY Super ♾️ Pro Board Setup
+============================================================
+
+Board: Mellow FLY Super ♾️ Pro Board
+Requires sensor gateway: True
+
+1. Setting up robot controller...
+   ✓ Robot connected on /dev/ttyUSB0
+
+2. Setting up sensor gateway...
+   ✓ Sensor gateway connected
+   Waiting for sensor data...
+   ✓ Receiving data from 3 sensors
+
+3. Creating sensor integration...
+   ✓ Integration ready
+```
+
+### Calibration
+
+After hardware setup, calibrate sensors:
+
+```python
+from sensor_gateway_client import SensorGatewayClient, GatewayConfig
+
+# Connect to gateway
+config = GatewayConfig(
+    mode='serial',
+    serial_port='/dev/ttyUSB1',
+    serial_baudrate=115200
+)
+
+client = SensorGatewayClient(config)
+client.connect()
+
+# Calibrate all sensors at home position
+# (Make sure robot is at 0° for all joints)
+client.calibrate_all()
+
+print("Calibration complete!")
+```
+
+Or use the interactive example:
+
+```bash
+python3 example_fly_board_setup.py
+# Select option 1: Calibrate sensors
+```
+
+### Testing
+
+#### Quick Serial Test
+
+Test gateway communication:
+
+```bash
+# On gateway (Pi/Pico), data should be streaming
+# On main PC, listen to serial port
+python3 -c "
+import serial
+s = serial.Serial('/dev/ttyUSB1', 115200)
+while True:
+    print(s.readline().decode().strip())
+"
+```
+
+You should see JSON data like:
+```json
+{"timestamp": 1234567.89, "joints": {"A": {"angle": 0.1, "accel_x": 0.002, ...}}}
+```
+
+#### Full Integration Test
+
+```bash
+# Run complete test
+python3 example_fly_board_setup.py
+
+# Menu options:
+# 1. Calibrate sensors
+# 2. Test basic movement
+# 3. Test closed-loop control
+# 4. Show system status
+```
+
+### Performance Considerations
+
+- **Update Rate**: Gateway runs at 10 Hz by default (configurable)
+- **Serial Bandwidth**: 115200 baud is sufficient for 3-6 sensors at 10 Hz
+- **Latency**: ~100ms typical (USB serial + processing)
+- **Network Option**: Pi Zero can also transmit via WiFi (TCP/UDP)
+
+### Power Considerations
+
+- Pi Zero 2W: ~150-200mA @ 5V (0.75-1W)
+- Pico: ~20-30mA @ 5V (0.1-0.15W)
+- Each ADXL345: ~140μA @ 3.3V (0.0005W)
+
+Total power for gateway + 3 sensors:
+- Pi Zero setup: ~1W
+- Pico setup: ~0.15W
 
 ---
 

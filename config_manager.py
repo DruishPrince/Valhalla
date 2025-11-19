@@ -62,6 +62,48 @@ class ConfigManager:
             "sequences_dir": "sequences",
             "calibrations_dir": "calibrations",
             "logs_dir": "logs"
+        },
+        "sensors": {
+            "enabled": False,
+            "mode": "direct",  # 'direct' or 'gateway'
+            "gateway_type": "pi_zero",  # 'pi_zero' or 'pico'
+            "config_file": "sensor_config.json",
+            "calibration_samples": 200,
+            "closed_loop_enabled": False,
+            "max_position_error": 5.0,
+            "correction_gain": 0.5,
+            "update_rate": 10.0
+        },
+        "sensor_gateway": {
+            "connection_mode": "serial",  # 'serial' or 'network'
+            "serial_port": "/dev/ttyUSB1",
+            "serial_baudrate": 115200,
+            "network_host": "192.168.1.100",
+            "network_port": 5555,
+            "network_protocol": "tcp",  # 'tcp' or 'udp'
+            "timeout": 1.0,
+            "data_freshness_threshold": 1.0
+        },
+        "boards": {
+            "current_board": "generic",  # 'generic', 'fly_super_8_pro'
+            "fly_super_8_pro": {
+                "description": "Mellow FLY Super ♾️ Pro Board",
+                "serial_port": "/dev/ttyUSB0",
+                "baudrate": 115200,
+                "requires_sensor_gateway": True,
+                "i2c_exposed": False,
+                "max_axes": 8,
+                "supports_grbl": True
+            },
+            "generic": {
+                "description": "Generic GRBL controller",
+                "serial_port": "/dev/ttyUSB0",
+                "baudrate": 115200,
+                "requires_sensor_gateway": False,
+                "i2c_exposed": True,
+                "max_axes": 6,
+                "supports_grbl": True
+            }
         }
     }
 
@@ -321,6 +363,59 @@ def get_vision_config() -> Dict[str, Any]:
 def get_sequencer_config() -> Dict[str, Any]:
     """Get sequencer configuration"""
     return get_config().get_section('sequencer')
+
+
+def get_sensor_config() -> Dict[str, Any]:
+    """Get sensor configuration"""
+    return get_config().get_section('sensors')
+
+
+def get_sensor_gateway_config() -> Dict[str, Any]:
+    """Get sensor gateway configuration"""
+    return get_config().get_section('sensor_gateway')
+
+
+def get_board_config(board_name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get board configuration
+
+    Args:
+        board_name: Specific board name, or None for current board
+
+    Returns:
+        Board configuration dictionary
+    """
+    config = get_config()
+    boards = config.get_section('boards')
+
+    if board_name is None:
+        board_name = boards.get('current_board', 'generic')
+
+    return boards.get(board_name, {})
+
+
+def set_current_board(board_name: str) -> bool:
+    """
+    Set the current board configuration
+
+    Args:
+        board_name: Name of board profile ('fly_super_8_pro', 'generic')
+
+    Returns:
+        True if set successfully
+    """
+    return get_config().set('boards.current_board', board_name)
+
+
+def is_sensor_gateway_required() -> bool:
+    """
+    Check if current board requires sensor gateway
+
+    Returns:
+        True if sensor gateway is required
+    """
+    board_config = get_board_config()
+    return board_config.get('requires_sensor_gateway', False)
 
 
 if __name__ == '__main__':
