@@ -18,7 +18,8 @@ import threading
 from typing import Dict, Optional, Callable
 from dataclasses import dataclass
 
-from sensor_manager import JointFeedback, SensorConfig, Orientation
+from sensor_manager import JointFeedback
+from adxl345_sensor import Orientation
 from kinematics import Vector3D
 
 
