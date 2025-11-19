@@ -396,20 +396,29 @@ class AsgardEnhanced(QMainWindow):
         joint_group = QGroupBox("Joint Control")
         joint_layout = QGridLayout(joint_group)
 
+        # Jog increment selector
+        joint_layout.addWidget(QLabel("Jog Increment:"), 0, 0)
+        self.jog_increment_combo = QComboBox()
+        self.jog_increment_combo.addItems(["0.1°", "1°", "5°", "10°", "45°", "90°"])
+        self.jog_increment_combo.setCurrentText("1°")
+        joint_layout.addWidget(self.jog_increment_combo, 0, 1, 1, 2)
+
         self.joint_controls = {}
         joints = [('A', 'Base'), ('B', 'Shoulder'), ('D', 'Elbow'),
                   ('X', 'Wrist Pitch'), ('Y', 'Wrist Roll'), ('Z', 'Wrist Rotate')]
 
         for i, (joint_id, joint_name) in enumerate(joints):
+            row = i + 1  # Offset by 1 for increment selector row
+
             # Label
-            joint_layout.addWidget(QLabel(f"{joint_name} ({joint_id}):"), i, 0)
+            joint_layout.addWidget(QLabel(f"{joint_name} ({joint_id}):"), row, 0)
 
             # Slider
             slider = QSlider(Qt.Horizontal)
             slider.setMinimum(-180)
             slider.setMaximum(180)
             slider.setValue(0)
-            joint_layout.addWidget(slider, i, 1)
+            joint_layout.addWidget(slider, row, 1)
 
             # Spinbox
             spinbox = QDoubleSpinBox()
@@ -417,18 +426,34 @@ class AsgardEnhanced(QMainWindow):
             spinbox.setMaximum(180)
             spinbox.setValue(0)
             spinbox.setSuffix("°")
-            joint_layout.addWidget(spinbox, i, 2)
+            joint_layout.addWidget(spinbox, row, 2)
+
+            # Jog - button
+            jog_minus_btn = QPushButton("-")
+            jog_minus_btn.setMaximumWidth(40)
+            jog_minus_btn.setToolTip(f"Jog {joint_name} negative")
+            jog_minus_btn.clicked.connect(lambda checked, j=joint_id: self.jog_joint(j, -1))
+            joint_layout.addWidget(jog_minus_btn, row, 3)
+
+            # Jog + button
+            jog_plus_btn = QPushButton("+")
+            jog_plus_btn.setMaximumWidth(40)
+            jog_plus_btn.setToolTip(f"Jog {joint_name} positive")
+            jog_plus_btn.clicked.connect(lambda checked, j=joint_id: self.jog_joint(j, 1))
+            joint_layout.addWidget(jog_plus_btn, row, 4)
 
             # Go button
             go_btn = QPushButton("Go")
             go_btn.clicked.connect(lambda checked, j=joint_id: self.move_joint(j))
-            joint_layout.addWidget(go_btn, i, 3)
+            joint_layout.addWidget(go_btn, row, 5)
 
             # Store controls
             self.joint_controls[joint_id] = {
                 'slider': slider,
                 'spinbox': spinbox,
-                'button': go_btn
+                'button': go_btn,
+                'jog_minus': jog_minus_btn,
+                'jog_plus': jog_plus_btn
             }
 
             # Connect slider and spinbox
@@ -1086,6 +1111,38 @@ class AsgardEnhanced(QMainWindow):
         angle = self.joint_controls[joint_id]['spinbox'].value()
         self.robot.move_joint(joint_id, angle, MovementType.G1_LINEAR, feedrate=500)
         self.log_console(f"Moving joint {joint_id} to {angle}°")
+
+    def jog_joint(self, joint_id: str, direction: int):
+        """
+        Jog a joint by the selected increment
+
+        Args:
+            joint_id: Joint identifier ('A', 'B', 'D', 'X', 'Y', 'Z')
+            direction: 1 for positive, -1 for negative
+        """
+        # Get current jog increment from combo box
+        increment_text = self.jog_increment_combo.currentText()
+        increment = float(increment_text.replace('°', ''))
+
+        # Calculate new angle
+        current_angle = self.joint_controls[joint_id]['spinbox'].value()
+        new_angle = current_angle + (increment * direction)
+
+        # Clamp to joint limits
+        new_angle = max(-180, min(180, new_angle))
+
+        # Update the spinbox (this will also update the slider and trigger visualization)
+        self.joint_controls[joint_id]['spinbox'].setValue(new_angle)
+
+        # If robot is connected, send the move command immediately
+        if self.robot.is_connected():
+            self.robot.move_joint(joint_id, new_angle, MovementType.G1_LINEAR, feedrate=500)
+            direction_str = "+" if direction > 0 else ""
+            self.log_console(f"Jogged joint {joint_id} {direction_str}{increment * direction}° → {new_angle:.1f}°")
+        else:
+            # Just update the UI
+            direction_str = "+" if direction > 0 else ""
+            self.log_console(f"Joint {joint_id} jogged {direction_str}{increment * direction}° → {new_angle:.1f}° (not connected)")
 
     def move_all_joints(self):
         """Move all joints to current positions"""
