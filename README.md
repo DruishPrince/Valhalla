@@ -27,6 +27,21 @@ Asgard is an enhanced Graphical User Interface (GUI) and control system for [Tho
 - **3D Visualization** - Real-time 3D robot display
 - **3D IK Controller** - Interactive 3D manipulation
 
+## What's New in Version 2.0
+
+🎉 **Major Enhancements for Robotics Developers!**
+
+- 🤖 **Modular Python API** - Control your robot programmatically with clean, documented APIs
+- 📹 **Computer Vision Integration** - Built-in OpenCV support for visual object detection
+- 🎬 **Action Recorder** - Record, save, and replay robot movements
+- 🗺️ **Path Planning** - Generate smooth, interpolated trajectories
+- ⚙️ **Configuration System** - Centralized settings management
+- 🚀 **Quick Start Wizard** - Interactive setup for new users
+- 📷 **Calibration Tools** - Easy camera-to-robot coordinate calibration
+- 📚 **Comprehensive Examples** - 6 interactive examples to get you started
+
+See [CHANGELOG.md](CHANGELOG.md) for complete details.
+
 ## Installation
 
 ### Prerequisites
@@ -38,11 +53,14 @@ Asgard is an enhanced Graphical User Interface (GUI) and control system for [Tho
 
 ```bash
 # Clone the repository
-git clone https://github.com/YourUsername/Valhalla.git
+git clone https://github.com/DruishPrince/Valhalla.git
 cd Valhalla
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Run the quick-start wizard (recommended for first-time users)
+python quickstart.py
 ```
 
 ### Manual Installation
@@ -193,6 +211,77 @@ Available examples:
 4. **Computer Vision Detection** - Object detection with multiple methods
 5. **Vision-Guided Control** - Use camera to guide robot movements
 6. **Vision-Triggered Sequence** - Automatic actions based on detection
+
+## Quick Reference
+
+### Essential Commands
+
+| Task | Command |
+|------|---------|
+| Run GUI | `python asgard.py` |
+| Quick setup wizard | `python quickstart.py` |
+| Interactive examples | `python examples.py` |
+| Calibrate camera | `python calibrate_camera.py` |
+| Test configuration | `python config_manager.py` |
+| Test path planning | `python path_planner.py` |
+
+### File Structure
+
+| File | Purpose |
+|------|---------|
+| `robot_controller.py` | Core robot control API |
+| `action_sequencer.py` | Record/playback sequences |
+| `vision_controller.py` | Computer vision integration |
+| `path_planner.py` | Smooth path generation |
+| `config_manager.py` | Configuration management |
+| `calibrate_camera.py` | Camera calibration tool |
+| `quickstart.py` | Interactive setup wizard |
+| `examples.py` | Example workflows |
+| `asgard.py` | Original PyQt5 GUI |
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `asgard_config.json` | Main configuration (auto-created) |
+| `camera_calibration.npz` | Camera calibration data |
+| `sequences/*.json` | Saved action sequences |
+
+### Common Workflows
+
+**1. First Time Setup:**
+```bash
+python quickstart.py
+```
+
+**2. Record a Task:**
+```python
+from robot_controller import RobotController
+from action_sequencer import ActionSequencer
+
+robot = RobotController()
+robot.connect('/dev/ttyUSB0')
+
+sequencer = ActionSequencer(robot)
+sequencer.start_recording("my_task")
+# ... perform movements ...
+sequencer.stop_recording()
+sequencer.save_sequence('my_task.json')
+```
+
+**3. Vision-Based Automation:**
+```python
+from vision_controller import VisionController
+
+vision = VisionController()
+vision.start_camera()
+vision.transformer.load_calibration('camera_calibration.npz')
+
+frame, objects = vision.process_frame()
+for obj in objects:
+    coords = vision.get_robot_coordinates(obj)
+    # Move robot to coords...
+```
 
 ## Module Documentation
 
