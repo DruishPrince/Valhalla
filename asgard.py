@@ -10,6 +10,7 @@ from about import Ui_Dialog as About_Ui_Dialog
 import serial_port_finder as spf
 
 import serial, time
+import re
 
 s0 = serial.Serial()
 
@@ -33,7 +34,7 @@ class AsgardGUI(Ui_MainWindow):
 
         self.HomeButton.pressed.connect(self.sendHomingCycleCommand)
         self.ZeroPositionButton.pressed.connect(self.sendZeroPositionCommand)
-        self.KillAlarmLockButton.pressed.connect(self.sendKillAlarmCommand)
+        # self.KillAlarmLockButton.pressed.connect(self.sendKillAlarmCommand)
 
         self.G0MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
         self.G1MoveRadioButton.clicked.connect(self.FeedRateBoxHide)
@@ -124,14 +125,14 @@ class AsgardGUI(Ui_MainWindow):
 
     def sendHomingCycleCommand(self):
         if s0.isOpen():
-            messageToSend="$H"
+            messageToSend="G28"
             messageToConsole=">>> " + messageToSend
             s0.write(messageToSend.encode('UTF-8'))
             self.ConsoleOutput.appendPlainText(messageToConsole)
 
     def sendZeroPositionCommand(self):
         if s0.isOpen():
-            messageToSend="G0 A0 B0 C0 D0 X0 Y0 Z0"
+            messageToSend="G0 X0 Y0 Z0 U0 V0 W0"
             messageToConsole=">>> " + messageToSend
             s0.write(messageToSend.encode('UTF-8'))
             self.ConsoleOutput.appendPlainText(messageToConsole)
@@ -161,7 +162,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "A" + str(self.SpinBoxArt1.value()) + feedRate
+            message=typeOfMovement + "X" + str(self.SpinBoxArt1.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -202,7 +203,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "B" + str(self.SpinBoxArt2.value()) + " C" + str(self.SpinBoxArt2.value()) + feedRate
+            message=typeOfMovement + "Y" + str(self.SpinBoxArt2.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -243,7 +244,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "D" + str(self.SpinBoxArt3.value()) + feedRate
+            message=typeOfMovement + "Z" + str(self.SpinBoxArt3.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -284,7 +285,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "X" + str(self.SpinBoxArt4.value()) + feedRate
+            message=typeOfMovement + "U" + str(self.SpinBoxArt4.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -325,7 +326,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "Y" + str(self.SpinBoxArt5.value()) + feedRate
+            message=typeOfMovement + "V" + str(self.SpinBoxArt5.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -366,7 +367,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "Z" + str(self.SpinBoxArt6.value()) + feedRate
+            message=typeOfMovement + "W" + str(self.SpinBoxArt6.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -407,7 +408,7 @@ class AsgardGUI(Ui_MainWindow):
             else:
                 typeOfMovement="G0 "
                 feedRate=""
-            message=typeOfMovement + "A" + str(self.SpinBoxArt1.value()) + " B" + str(self.SpinBoxArt2.value()) + " C" + str(self.SpinBoxArt2.value()) + " D" + str(self.SpinBoxArt3.value()) + " X" + str(self.SpinBoxArt4.value()) + " Y" + str(self.SpinBoxArt5.value()) + " Z" + str(self.SpinBoxArt6.value()) + feedRate
+            message=typeOfMovement + "X" + str(self.SpinBoxArt1.value()) + " Y" + str(self.SpinBoxArt2.value()) + " Z" + str(self.SpinBoxArt3.value()) + " U" + str(self.SpinBoxArt4.value()) + " V" + str(self.SpinBoxArt5.value()) + " W" + str(self.SpinBoxArt6.value()) + feedRate
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -418,7 +419,7 @@ class AsgardGUI(Ui_MainWindow):
 # Gripper Functions
     def MoveGripper(self): # En realidad esto no va así, hay que calcular el movimiento acoplado. Proximamente.
         if s0.isOpen():
-            message="M3 S" + str((255/100)*self.SpinBoxGripper.value())
+            message="M280 P0 S" + str(self.SpinBoxGripper.value())
             messageToSend = message + "\n"
             messageToConsole = ">>> " + message
             s0.write(messageToSend.encode('UTF-8'))
@@ -476,7 +477,7 @@ class AsgardGUI(Ui_MainWindow):
     def updateConsole(self, dataRead):
         verboseShow=self.ConsoleShowVerbosecheckBox.isChecked()
         okShow=self.ConsoleShowOkRespcheckBox.isChecked()
-        isDataReadVerbose = "MPos" in dataRead
+        isDataReadVerbose = "hstat" in dataRead
         isDataOkResponse = "ok" in dataRead
 
         if dataRead=="SERIAL-DISCONNECTED":
@@ -505,15 +506,23 @@ class AsgardGUI(Ui_MainWindow):
         else:
             self.noSerialConnection()
 
-    def updateFKPosDisplay(self,dataRead):
-        data=dataRead[1:][:-1].split(",")
-        self.updateCurrentState(data[0])
-        self.FKCurrentPosValueArt1.setText(data[1][5:][:-2]+"º")
-        self.FKCurrentPosValueArt2.setText(data[2][:-2]+"º")
-        self.FKCurrentPosValueArt3.setText(data[4][:-2]+"º")
-        self.FKCurrentPosValueArt4.setText(data[5][:-2]+"º")
-        self.FKCurrentPosValueArt5.setText(data[6][:-2]+"º")
-        self.FKCurrentPosValueArt6.setText(data[7][:-2]+"º")
+    def updateFKPosDisplay(self,dataRead):        
+        status = re.search(r'"status"\s*:\s*"([^"]+)"', dataRead).group(1)
+        positions = re.search(r'"pos"\s*:\s*\[([^\]]+)\]', dataRead).group(1).split(',')
+        
+        if status == 'I':
+            self.updateCurrentState("Idle")
+        elif status == 'B':
+            self.updateCurrentState("Run")
+        elif status == 'O':
+            self.updateCurrentState("Alarm")
+            
+        self.FKCurrentPosValueArt1.setText(positions[0][:-1]+"º")
+        self.FKCurrentPosValueArt2.setText(positions[1][:-1]+"º")
+        self.FKCurrentPosValueArt3.setText(positions[2][:-1]+"º")
+        self.FKCurrentPosValueArt4.setText(positions[3][:-1]+"º")
+        self.FKCurrentPosValueArt5.setText(positions[4][:-1]+"º")
+        self.FKCurrentPosValueArt6.setText(positions[5][:-1]+"º")
 
     def updateCurrentState(self, state):
         self.RobotStateDisplay.setText(state)
@@ -566,9 +575,9 @@ class SerialThreadClass(QtCore.QThread):
                 try:
                     if time.time()-self.elapsedTime>0.1:
                         self.elapsedTime=time.time()
-                        s0.write("?\n".encode('UTF-8'))
+                        s0.write("M408\n".encode('UTF-8'))
                     dataRead = str(s0.readline())
-                    dataCropped=dataRead[2:][:-5]
+                    dataCropped=dataRead[2:][:-3]
                     if dataCropped!="":
                         self.serialSignal.emit(dataCropped)
                 except Exception as e:
