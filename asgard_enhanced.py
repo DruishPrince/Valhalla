@@ -241,7 +241,7 @@ class AsgardEnhanced(QMainWindow):
 
             # Connect slider and spinbox
             slider.valueChanged.connect(spinbox.setValue)
-            spinbox.valueChanged.connect(slider.setValue)
+            spinbox.valueChanged.connect(lambda v: slider.setValue(int(v)))
 
         layout.addWidget(joint_group)
 
