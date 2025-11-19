@@ -41,14 +41,16 @@ class ThorKinematics:
     Adjust DH parameters to match your specific Thor arm.
     """
 
-    # Default DH parameters for Thor arm (adjust to your robot)
-    # These are approximate values - measure your actual robot!
+    # Default DH parameters for Thor arm
+    # Based on official Thor dimensions from https://github.com/AngelLM/Thor
+    # Joint positions: Base(0,0,0), Art1(0,0,49), Art2(0,0,137),
+    # Art3(0,0,295), Art4(0,0,377.5), Art5(0,0,510), Art6(0,0,610.431)
     DEFAULT_DH_PARAMS = {
-        'base_height': 0,      # Height of base (mm)
-        'shoulder_offset': 0,   # Shoulder offset (mm)
-        'upper_arm': 200,      # Upper arm length (mm)
-        'forearm': 200,        # Forearm length (mm)
-        'wrist_length': 100,   # Wrist to end effector (mm)
+        'base_height': 137,    # Height from base to main shoulder joint (mm)
+        'shoulder_offset': 0,   # Shoulder horizontal offset (mm)
+        'upper_arm': 240,      # Upper arm length: Art2->Art4 (mm)
+        'forearm': 133,        # Forearm length: Art4->Art5 (mm)
+        'wrist_length': 100,   # Wrist to end effector: Art5->Art6 (mm)
     }
 
     def __init__(self, dh_params: Optional[Dict] = None):

@@ -1266,17 +1266,17 @@ class AsgardEnhanced(QMainWindow):
         summary += "=" * 50 + "\n"
         if 'robot_dimensions' in self.config.config:
             dims = self.config.config['robot_dimensions']
-            summary += f"Base Height: {dims.get('base_height', 0):.0f}\n"
+            summary += f"Base Height: {dims.get('base_height', 137):.0f}\n"
             summary += f"Shoulder Offset: {dims.get('shoulder_offset', 0):.0f}\n"
-            summary += f"Upper Arm: {dims.get('upper_arm', 200):.0f}\n"
-            summary += f"Forearm: {dims.get('forearm', 200):.0f}\n"
+            summary += f"Upper Arm: {dims.get('upper_arm', 240):.0f}\n"
+            summary += f"Forearm: {dims.get('forearm', 133):.0f}\n"
             summary += f"Wrist Length: {dims.get('wrist_length', 100):.0f}\n"
 
             # Calculate and show max reach
-            total = dims.get('upper_arm', 200) + dims.get('forearm', 200) + dims.get('wrist_length', 100)
+            total = dims.get('upper_arm', 240) + dims.get('forearm', 133) + dims.get('wrist_length', 100)
             summary += f"\nMaximum Reach: {total:.0f} mm\n"
         else:
-            summary += "Using default dimensions\n"
+            summary += "Using default Thor dimensions (Base: 137mm, Upper: 240mm, Forearm: 133mm, Wrist: 100mm)\n"
 
         summary += "\n" + "=" * 50 + "\n"
         summary += "JOINT LIMITS (degrees)\n"
