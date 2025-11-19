@@ -85,7 +85,7 @@ class ConfigManager:
             "data_freshness_threshold": 1.0
         },
         "boards": {
-            "current_board": "generic",  # 'generic', 'fly_super_8_pro'
+            "current_board": "fly_super_8_pro",  # 'generic', 'fly_super_8_pro'
             "fly_super_8_pro": {
                 "description": "Mellow FLY Super ♾️ Pro Board",
                 "serial_port": "/dev/ttyUSB0",
@@ -408,7 +408,7 @@ def get_board_config(board_name: Optional[str] = None) -> Dict[str, Any]:
     boards = config.get_section('boards')
 
     if board_name is None:
-        board_name = boards.get('current_board', 'generic')
+        board_name = boards.get('current_board', 'fly_super_8_pro')
 
     return boards.get(board_name, {})
 

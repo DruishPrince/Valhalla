@@ -551,7 +551,8 @@ class AsgardEnhanced(QMainWindow):
 
         board_layout.addWidget(QLabel("Board Type:"))
         self.board_combo = QComboBox()
-        self.board_combo.addItems(["Generic GRBL", "FLY Super ♾️ Pro"])
+        self.board_combo.addItems(["FLY Super ♾️ Pro", "Generic GRBL"])
+        self.board_combo.setCurrentIndex(0)  # FLY Super ♾️ Pro as default
         board_layout.addWidget(self.board_combo)
         board_layout.addStretch()
 
