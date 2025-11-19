@@ -127,6 +127,10 @@ class VisualizerEventFilter(QObject):
         self.dragging_joint = None  # Which joint index is being dragged (None = end effector)
         self.frame_skip_counter = 0  # For performance - update every N frames
 
+        # Axis lock system (tangent locks)
+        self.axis_lock = None  # None, 'X', 'Y', or 'Z'
+        self.drag_start_pos = None  # Starting position for locked axis dragging
+
     def find_nearest_joint(self, mouse_x, mouse_y, viewport):
         """
         Find which joint marker is nearest to the mouse click.
@@ -219,6 +223,7 @@ class VisualizerEventFilter(QObject):
                                  for joint_id, ctrl in self.gui.joint_controls.items()}
                 end_pos, _ = self.gui.kinematics.forward_kinematics(current_angles)
                 self.gui.viz_target_pos = [end_pos.x, end_pos.y, end_pos.z]
+                self.drag_start_pos = [end_pos.x, end_pos.y, end_pos.z]  # Store start position for axis locks
 
                 # Determine which viewport we're in by checking mouse position
                 # Convert to figure coordinates
@@ -357,23 +362,49 @@ class VisualizerEventFilter(QObject):
                     world_dx = dx * scale
                     world_dy = -dy * scale  # Invert Y (Qt Y goes down, world Y goes up)
 
-                    # Update target position based on viewport
-                    if self.drag_viewport == 'top':
-                        # Top view: drag in XY plane
-                        self.gui.viz_target_pos[0] += world_dx  # X
-                        self.gui.viz_target_pos[1] += world_dy  # Y
-                    elif self.drag_viewport == 'front':
-                        # Front view: drag in XZ plane
-                        self.gui.viz_target_pos[0] += world_dx  # X
-                        self.gui.viz_target_pos[2] += world_dy  # Z
-                    elif self.drag_viewport == 'side':
-                        # Side view: drag in YZ plane
-                        self.gui.viz_target_pos[1] += world_dx  # Y
-                        self.gui.viz_target_pos[2] += world_dy  # Z
-                    else:  # perspective
-                        # Perspective: drag in XY plane
-                        self.gui.viz_target_pos[0] += world_dx  # X
-                        self.gui.viz_target_pos[1] += world_dy  # Y
+                    # AXIS LOCK SYSTEM: If an axis is locked, only move along that axis
+                    if self.axis_lock:
+                        # Reset to starting position
+                        if self.drag_start_pos:
+                            self.gui.viz_target_pos = self.drag_start_pos.copy()
+
+                        # Combined mouse movement (diagonal movement magnitude)
+                        combined_delta = ((world_dx ** 2) + (world_dy ** 2)) ** 0.5
+                        # Use sign of dominant axis for direction
+                        if abs(world_dx) > abs(world_dy):
+                            direction = 1 if world_dx > 0 else -1
+                        else:
+                            direction = 1 if world_dy > 0 else -1
+
+                        combined_delta *= direction
+
+                        # Apply to locked axis only
+                        if self.axis_lock == 'X':
+                            self.gui.viz_target_pos[0] = self.drag_start_pos[0] + combined_delta
+                        elif self.axis_lock == 'Y':
+                            self.gui.viz_target_pos[1] = self.drag_start_pos[1] + combined_delta
+                        elif self.axis_lock == 'Z':
+                            self.gui.viz_target_pos[2] = self.drag_start_pos[2] + combined_delta
+
+                    else:
+                        # No axis lock - normal viewport-based dragging
+                        # Update target position based on viewport
+                        if self.drag_viewport == 'top':
+                            # Top view: drag in XY plane
+                            self.gui.viz_target_pos[0] += world_dx  # X
+                            self.gui.viz_target_pos[1] += world_dy  # Y
+                        elif self.drag_viewport == 'front':
+                            # Front view: drag in XZ plane
+                            self.gui.viz_target_pos[0] += world_dx  # X
+                            self.gui.viz_target_pos[2] += world_dy  # Z
+                        elif self.drag_viewport == 'side':
+                            # Side view: drag in YZ plane
+                            self.gui.viz_target_pos[1] += world_dx  # Y
+                            self.gui.viz_target_pos[2] += world_dy  # Z
+                        else:  # perspective
+                            # Perspective: drag in XY plane
+                            self.gui.viz_target_pos[0] += world_dx  # X
+                            self.gui.viz_target_pos[1] += world_dy  # Y
 
                     # Clamp to workspace
                     self.gui.viz_target_pos[0] = max(-600, min(600, self.gui.viz_target_pos[0]))
@@ -408,14 +439,60 @@ class VisualizerEventFilter(QObject):
 
                             # Update info label
                             status_prefix = "~" if ik_result.is_approximate else ""
+                            axis_lock_text = f" [🔒{self.axis_lock}]" if self.axis_lock else ""
                             self.gui.viz_info_label.setText(
-                                f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
+                                f"{status_prefix}Dragging{axis_lock_text}: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
                             )
 
                             # Update visualization
                             self.gui.update_3d_visualization()
 
                 return True  # Consume event
+
+        # Keyboard events for axis locking (tangent locks)
+        elif event_type == QEvent.KeyPress:
+            key = event.key()
+
+            # X key - lock to X axis
+            if key == Qt.Key_X:
+                if self.axis_lock == 'X':
+                    self.axis_lock = None
+                    self.gui.log_console("🔓 Axis lock removed")
+                else:
+                    self.axis_lock = 'X'
+                    self.gui.log_console("🔒 Locked to X axis")
+                self.gui.update_viz_axis_lock_indicator()
+                return True
+
+            # Y key - lock to Y axis
+            elif key == Qt.Key_Y:
+                if self.axis_lock == 'Y':
+                    self.axis_lock = None
+                    self.gui.log_console("🔓 Axis lock removed")
+                else:
+                    self.axis_lock = 'Y'
+                    self.gui.log_console("🔒 Locked to Y axis")
+                self.gui.update_viz_axis_lock_indicator()
+                return True
+
+            # Z key - lock to Z axis
+            elif key == Qt.Key_Z:
+                if self.axis_lock == 'Z':
+                    self.axis_lock = None
+                    self.gui.log_console("🔓 Axis lock removed")
+                else:
+                    self.axis_lock = 'Z'
+                    self.gui.log_console("🔒 Locked to Z axis")
+                self.gui.update_viz_axis_lock_indicator()
+                return True
+
+            # Escape key - clear any axis lock
+            elif key == Qt.Key_Escape:
+                if self.axis_lock:
+                    self.axis_lock = None
+                    self.gui.log_console("🔓 Axis lock removed")
+                    self.gui.update_viz_axis_lock_indicator()
+                    return True
 
         # Let other events pass through
         return False
@@ -757,6 +834,45 @@ class AsgardEnhanced(QMainWindow):
         info_layout.addWidget(self.viz_info_label)
 
         layout.addWidget(info_group)
+
+        # Axis Lock Controls (Tangent Locks)
+        axis_lock_group = QGroupBox("Axis Locks (Tangent Constraints)")
+        axis_lock_layout = QHBoxLayout(axis_lock_group)
+
+        axis_lock_label = QLabel("Lock movement to axis:")
+        axis_lock_layout.addWidget(axis_lock_label)
+
+        self.axis_lock_x_btn = QPushButton("X")
+        self.axis_lock_x_btn.setCheckable(True)
+        self.axis_lock_x_btn.setMaximumWidth(40)
+        self.axis_lock_x_btn.clicked.connect(lambda: self.toggle_axis_lock('X'))
+        self.axis_lock_x_btn.setToolTip("Lock to X axis (or press X key while dragging)")
+        axis_lock_layout.addWidget(self.axis_lock_x_btn)
+
+        self.axis_lock_y_btn = QPushButton("Y")
+        self.axis_lock_y_btn.setCheckable(True)
+        self.axis_lock_y_btn.setMaximumWidth(40)
+        self.axis_lock_y_btn.clicked.connect(lambda: self.toggle_axis_lock('Y'))
+        self.axis_lock_y_btn.setToolTip("Lock to Y axis (or press Y key while dragging)")
+        axis_lock_layout.addWidget(self.axis_lock_y_btn)
+
+        self.axis_lock_z_btn = QPushButton("Z")
+        self.axis_lock_z_btn.setCheckable(True)
+        self.axis_lock_z_btn.setMaximumWidth(40)
+        self.axis_lock_z_btn.clicked.connect(lambda: self.toggle_axis_lock('Z'))
+        self.axis_lock_z_btn.setToolTip("Lock to Z axis (or press Z key while dragging)")
+        axis_lock_layout.addWidget(self.axis_lock_z_btn)
+
+        self.axis_lock_status_label = QLabel("None")
+        self.axis_lock_status_label.setStyleSheet("font-weight: bold; color: gray;")
+        axis_lock_layout.addWidget(self.axis_lock_status_label)
+
+        axis_lock_help = QLabel("(Keyboard: Press X/Y/Z to toggle locks, ESC to clear)")
+        axis_lock_help.setStyleSheet("color: gray; font-style: italic; font-size: 10px;")
+        axis_lock_layout.addWidget(axis_lock_help)
+
+        axis_lock_layout.addStretch()
+        layout.addWidget(axis_lock_group)
 
         # Matplotlib quad view canvas (like 3D Studio Max)
         self.viz_figure = Figure(figsize=(12, 10))
@@ -1751,6 +1867,38 @@ class AsgardEnhanced(QMainWindow):
         self.viz_ax_side.view_init(elev=0, azim=0)
         self.viz_ax_persp.view_init(elev=20, azim=45)
         self.viz_canvas.draw()
+
+    def toggle_axis_lock(self, axis: str):
+        """Toggle axis lock for the visualizer"""
+        current_lock = self.viz_event_filter.axis_lock
+
+        if current_lock == axis:
+            # Disable the lock
+            self.viz_event_filter.axis_lock = None
+            self.log_console(f"🔓 Removed {axis} axis lock")
+        else:
+            # Enable the lock
+            self.viz_event_filter.axis_lock = axis
+            self.log_console(f"🔒 Locked to {axis} axis")
+
+        self.update_viz_axis_lock_indicator()
+
+    def update_viz_axis_lock_indicator(self):
+        """Update the axis lock UI indicators"""
+        current_lock = self.viz_event_filter.axis_lock
+
+        # Update button states
+        self.axis_lock_x_btn.setChecked(current_lock == 'X')
+        self.axis_lock_y_btn.setChecked(current_lock == 'Y')
+        self.axis_lock_z_btn.setChecked(current_lock == 'Z')
+
+        # Update status label
+        if current_lock:
+            self.axis_lock_status_label.setText(f"🔒 {current_lock} Axis")
+            self.axis_lock_status_label.setStyleSheet("font-weight: bold; color: #ff6600;")
+        else:
+            self.axis_lock_status_label.setText("None")
+            self.axis_lock_status_label.setStyleSheet("font-weight: bold; color: gray;")
 
     def on_viz_mouse_press(self, event):
         """Handle mouse press in 3D visualization"""
