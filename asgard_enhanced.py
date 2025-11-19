@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QTextEdit, QGroupBox, QGridLayout, QCheckBox, QLineEdit,
     QSplitter, QFileDialog, QMessageBox, QProgressBar, QStatusBar
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QEvent, QObject
 from PyQt5.QtGui import QImage, QPixmap, QFont
 
 import matplotlib
@@ -108,6 +108,183 @@ class KinectWorker(QThread):
     def stop(self):
         """Stop capture thread"""
         self.running = False
+
+
+class VisualizerEventFilter(QObject):
+    """
+    Qt event filter to intercept mouse events before matplotlib sees them.
+    This allows us to implement middle-mouse dragging without matplotlib
+    interfering with its own pan/zoom functionality.
+    """
+    def __init__(self, parent_gui):
+        super().__init__()
+        self.gui = parent_gui
+        self.dragging = False
+        self.last_x = 0
+        self.last_y = 0
+        self.drag_viewport = None
+
+    def eventFilter(self, obj, event):
+        """Filter Qt mouse events on the canvas"""
+        # Only handle events on the matplotlib canvas
+        if obj != self.gui.viz_canvas:
+            return False
+
+        event_type = event.type()
+
+        # Middle mouse button press - start dragging
+        if event_type == QEvent.MouseButtonPress:
+            if event.button() == Qt.MiddleButton:
+                if not self.gui.viz_interactive_mode.isChecked():
+                    self.gui.log_console("⚠ Interactive mode is OFF - enable it to drag")
+                    return False
+
+                self.dragging = True
+                self.last_x = event.x()
+                self.last_y = event.y()
+
+                # Get current end effector position
+                current_angles = {joint_id: ctrl['spinbox'].value()
+                                 for joint_id, ctrl in self.gui.joint_controls.items()}
+                end_pos, _ = self.gui.kinematics.forward_kinematics(current_angles)
+                self.gui.viz_target_pos = [end_pos.x, end_pos.y, end_pos.z]
+
+                # Determine which viewport we're in by checking mouse position
+                # Convert to figure coordinates
+                canvas_width = self.gui.viz_canvas.width()
+                canvas_height = self.gui.viz_canvas.height()
+
+                # Simple quadrant detection (2x2 grid)
+                if event.y() < canvas_height / 2:  # Top half
+                    if event.x() < canvas_width / 2:  # Left
+                        self.drag_viewport = 'top'
+                    else:  # Right
+                        self.drag_viewport = 'front'
+                else:  # Bottom half
+                    if event.x() < canvas_width / 2:  # Left
+                        self.drag_viewport = 'side'
+                    else:  # Right
+                        self.drag_viewport = 'persp'
+
+                # Disable auto-update temporarily
+                self.gui.viz_auto_update.setChecked(False)
+
+                view_label = self.drag_viewport.upper() if self.drag_viewport else "UNKNOWN"
+                self.gui.log_console(f"✓ DRAG STARTED in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
+
+                return True  # Consume event to prevent matplotlib from seeing it
+
+        # Middle mouse button release - stop dragging
+        elif event_type == QEvent.MouseButtonRelease:
+            if event.button() == Qt.MiddleButton and self.dragging:
+                self.dragging = False
+
+                # Calculate IK for final position
+                if self.gui.viz_target_pos:
+                    from kinematics import Point3D
+                    target = Point3D(
+                        x=self.gui.viz_target_pos[0],
+                        y=self.gui.viz_target_pos[1],
+                        z=self.gui.viz_target_pos[2]
+                    )
+
+                    current_angles = {joint_id: ctrl['spinbox'].value()
+                                     for joint_id, ctrl in self.gui.joint_controls.items()}
+                    ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
+
+                    if ik_result.success:
+                        # Update joint controls
+                        for joint_id, angle in ik_result.angles.items():
+                            if joint_id in self.gui.joint_controls:
+                                self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
+                                self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
+
+                        self.gui.log_console(f"✓ Moved to ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) - {ik_result.reason}")
+                    else:
+                        self.gui.log_console(f"✗ Drag failed: {ik_result.reason}")
+
+                # Re-enable auto-update
+                self.gui.viz_auto_update.setChecked(True)
+                self.gui.update_3d_visualization()
+
+                self.drag_viewport = None
+                return True  # Consume event
+
+        # Mouse motion - update drag position
+        elif event_type == QEvent.MouseMove:
+            if self.dragging:
+                # Calculate pixel delta
+                dx = event.x() - self.last_x
+                dy = event.y() - self.last_y
+
+                self.last_x = event.x()
+                self.last_y = event.y()
+
+                # Convert pixel delta to world space delta
+                # Scale factor: ~0.5mm per pixel (adjust as needed)
+                scale = 0.8
+                world_dx = dx * scale
+                world_dy = -dy * scale  # Invert Y (Qt Y goes down, world Y goes up)
+
+                # Update target position based on viewport
+                if self.drag_viewport == 'top':
+                    # Top view: drag in XY plane
+                    self.gui.viz_target_pos[0] += world_dx  # X
+                    self.gui.viz_target_pos[1] += world_dy  # Y
+                elif self.drag_viewport == 'front':
+                    # Front view: drag in XZ plane
+                    self.gui.viz_target_pos[0] += world_dx  # X
+                    self.gui.viz_target_pos[2] += world_dy  # Z
+                elif self.drag_viewport == 'side':
+                    # Side view: drag in YZ plane
+                    self.gui.viz_target_pos[1] += world_dx  # Y
+                    self.gui.viz_target_pos[2] += world_dy  # Z
+                else:  # perspective
+                    # Perspective: drag in XY plane
+                    self.gui.viz_target_pos[0] += world_dx  # X
+                    self.gui.viz_target_pos[1] += world_dy  # Y
+
+                # Clamp to workspace
+                self.gui.viz_target_pos[0] = max(-600, min(600, self.gui.viz_target_pos[0]))
+                self.gui.viz_target_pos[1] = max(-600, min(600, self.gui.viz_target_pos[1]))
+                self.gui.viz_target_pos[2] = max(0, min(600, self.gui.viz_target_pos[2]))
+
+                # Calculate IK for preview
+                from kinematics import Point3D
+                target = Point3D(
+                    x=self.gui.viz_target_pos[0],
+                    y=self.gui.viz_target_pos[1],
+                    z=self.gui.viz_target_pos[2]
+                )
+
+                current_angles = {joint_id: ctrl['spinbox'].value()
+                                 for joint_id, ctrl in self.gui.joint_controls.items()}
+                ik_result = self.gui.kinematics.inverse_kinematics(target, current_angles)
+
+                if ik_result.success:
+                    # Update joint controls without triggering moves
+                    for joint_id, angle in ik_result.angles.items():
+                        if joint_id in self.gui.joint_controls:
+                            self.gui.joint_controls[joint_id]['spinbox'].blockSignals(True)
+                            self.gui.joint_controls[joint_id]['slider'].blockSignals(True)
+                            self.gui.joint_controls[joint_id]['slider'].setValue(int(angle))
+                            self.gui.joint_controls[joint_id]['spinbox'].setValue(angle)
+                            self.gui.joint_controls[joint_id]['spinbox'].blockSignals(False)
+                            self.gui.joint_controls[joint_id]['slider'].blockSignals(False)
+
+                    # Update info label
+                    status_prefix = "~" if ik_result.is_approximate else ""
+                    self.gui.viz_info_label.setText(
+                        f"{status_prefix}Dragging: ({target.x:.1f}, {target.y:.1f}, {target.z:.1f}) mm, error: {ik_result.error:.1f}mm"
+                    )
+
+                    # Update visualization
+                    self.gui.update_3d_visualization()
+
+                return True  # Consume event
+
+        # Let other events pass through
+        return False
 
 
 class AsgardEnhanced(QMainWindow):
@@ -463,11 +640,14 @@ class AsgardEnhanced(QMainWindow):
         self.viz_figure.tight_layout(pad=2.0)
 
         # Connect mouse events for interactive manipulation
-        self.viz_canvas.mpl_connect('button_press_event', self.on_viz_mouse_press)
-        self.viz_canvas.mpl_connect('button_release_event', self.on_viz_mouse_release)
-        self.viz_canvas.mpl_connect('motion_notify_event', self.on_viz_mouse_motion)
+        # Note: Keep matplotlib connections for scroll and keyboard events
         self.viz_canvas.mpl_connect('scroll_event', self.on_viz_scroll)
         self.viz_canvas.mpl_connect('key_press_event', self.on_viz_key_press)
+
+        # Install Qt event filter to intercept mouse drag events BEFORE matplotlib sees them
+        # This is more reliable than matplotlib's event system for middle-mouse dragging
+        self.viz_event_filter = VisualizerEventFilter(self)
+        self.viz_canvas.installEventFilter(self.viz_event_filter)
 
         layout.addWidget(self.viz_canvas)
 
