@@ -415,6 +415,10 @@ class AsgardEnhanced(QMainWindow):
         self.viz_figure = Figure(figsize=(12, 10))
         self.viz_canvas = FigureCanvas(self.viz_figure)
 
+        # Disable matplotlib's default toolbar navigation (important for custom mouse handling)
+        self.viz_canvas.setFocusPolicy(Qt.ClickFocus)
+        self.viz_canvas.setFocus()
+
         # Create 2x2 grid of subplots
         # Top-left: Top view (XY plane)
         self.viz_ax_top = self.viz_figure.add_subplot(221, projection='3d')
@@ -1150,11 +1154,21 @@ class AsgardEnhanced(QMainWindow):
 
     def on_viz_mouse_press(self, event):
         """Handle mouse press in 3D visualization"""
+        # Debug: Log ALL mouse presses
+        if event.button:
+            button_name = {1: 'LEFT', 2: 'MIDDLE', 3: 'RIGHT'}.get(event.button, f'BUTTON{event.button}')
+            self.log_console(f"Mouse press detected: {button_name} button, inaxes={event.inaxes is not None}")
+
         if not self.viz_interactive_mode.isChecked():
+            self.log_console("Interactive mode is OFF - enable it to drag")
             return
 
         # Middle mouse button to start dragging
-        if event.button == 2 and event.inaxes in self.viz_axes.values():
+        if event.button == 2:
+            if event.inaxes not in self.viz_axes.values():
+                self.log_console("Middle-click detected but not in a viewport - click inside a view")
+                return
+
             # Get current end effector position
             current_angles = {joint_id: ctrl['spinbox'].value()
                              for joint_id, ctrl in self.joint_controls.items()}
@@ -1174,7 +1188,8 @@ class AsgardEnhanced(QMainWindow):
             self.viz_auto_update.setChecked(False)
 
             view_label = self.viz_drag_viewport.upper() if self.viz_drag_viewport else "UNKNOWN"
-            self.log_console(f"Interactive mode: Dragging in {view_label} view")
+            self.log_console(f"✓ DRAG STARTED in {view_label} view at ({end_pos.x:.0f}, {end_pos.y:.0f}, {end_pos.z:.0f})")
+            self.log_console(f"  Now move your mouse while holding middle button...")
 
     def on_viz_mouse_release(self, event):
         """Handle mouse release in 3D visualization"""
@@ -1215,7 +1230,10 @@ class AsgardEnhanced(QMainWindow):
 
     def on_viz_mouse_motion(self, event):
         """Handle mouse motion in 3D visualization"""
-        if not self.viz_dragging or event.inaxes not in self.viz_axes.values():
+        if not self.viz_dragging:
+            return
+
+        if event.inaxes not in self.viz_axes.values():
             return
 
         if event.xdata is None or event.ydata is None:
@@ -1224,6 +1242,11 @@ class AsgardEnhanced(QMainWindow):
         # Calculate movement deltas (increase sensitivity)
         dx = (event.xdata - self.viz_drag_start[0])
         dy = (event.ydata - self.viz_drag_start[1])
+
+        # Debug output every 10 motion events
+        self.viz_drag_counter += 1
+        if self.viz_drag_counter == 1:
+            self.log_console(f"✓ Mouse motion detected! dx={dx:.2f}, dy={dy:.2f}")
 
         # Increased sensitivity for better responsiveness
         sensitivity = 2.0
