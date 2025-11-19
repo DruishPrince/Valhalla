@@ -104,6 +104,25 @@ class ConfigManager:
                 "max_axes": 6,
                 "supports_grbl": True
             }
+        },
+        "kinect": {
+            "enabled": False,
+            "version": "auto",  # 'auto', 'v1', 'v2', 'azure'
+            "use_depth": True,
+            "min_depth_mm": 500,
+            "max_depth_mm": 4000,
+            "depth_smoothing_window": 5,
+            "min_object_area": 500,
+            "max_object_area": 50000,
+            "point_cloud_enabled": True,
+            "save_point_clouds": False,
+            "detection_mode": "color",  # 'color', 'contour', 'depth_clustering'
+            "visualization": {
+                "show_depth": True,
+                "show_point_cloud": False,
+                "depth_colormap": "JET",  # OpenCV colormap
+                "overlay_detections": True
+            }
         }
     }
 
@@ -416,6 +435,17 @@ def is_sensor_gateway_required() -> bool:
     """
     board_config = get_board_config()
     return board_config.get('requires_sensor_gateway', False)
+
+
+def get_kinect_config() -> Dict[str, Any]:
+    """Get Kinect camera configuration"""
+    return get_config().get_section('kinect')
+
+
+def is_kinect_enabled() -> bool:
+    """Check if Kinect depth camera is enabled"""
+    kinect_config = get_kinect_config()
+    return kinect_config.get('enabled', False)
 
 
 if __name__ == '__main__':
