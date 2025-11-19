@@ -29,6 +29,12 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt5.QtGui import QImage, QPixmap, QFont
 
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D
+
 # Import our enhanced modules
 from robot_controller import RobotController, MovementType
 from kinect_interface import KinectInterface, visualize_depth
@@ -158,6 +164,7 @@ class AsgardEnhanced(QMainWindow):
 
         # Add tabs
         self.tabs.addTab(self.create_control_tab(), "Robot Control")
+        self.tabs.addTab(self.create_visualizer_tab(), "3D Visualizer")
         self.tabs.addTab(self.create_kinect_tab(), "Kinect Vision")
         self.tabs.addTab(self.create_sensors_tab(), "Sensors")
         self.tabs.addTab(self.create_sequencer_tab(), "Action Sequencer")
@@ -243,6 +250,9 @@ class AsgardEnhanced(QMainWindow):
             # Connect slider and spinbox
             slider.valueChanged.connect(spinbox.setValue)
             spinbox.valueChanged.connect(lambda v: slider.setValue(int(v)))
+
+            # Connect to 3D visualization update
+            spinbox.valueChanged.connect(self.on_joint_changed)
 
         layout.addWidget(joint_group)
 
@@ -343,6 +353,62 @@ class AsgardEnhanced(QMainWindow):
 
         layout.addWidget(console_group)
         layout.addStretch()
+
+        return tab
+
+    def create_visualizer_tab(self) -> QWidget:
+        """Create 3D arm visualizer tab"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Controls
+        controls_group = QGroupBox("Visualization Controls")
+        controls_layout = QHBoxLayout(controls_group)
+
+        self.viz_auto_update = QCheckBox("Auto-update from joint controls")
+        self.viz_auto_update.setChecked(True)
+        controls_layout.addWidget(self.viz_auto_update)
+
+        self.viz_show_workspace = QCheckBox("Show workspace bounds")
+        self.viz_show_workspace.setChecked(False)
+        self.viz_show_workspace.toggled.connect(self.update_3d_visualization)
+        controls_layout.addWidget(self.viz_show_workspace)
+
+        self.viz_show_target = QCheckBox("Show IK target")
+        self.viz_show_target.setChecked(True)
+        self.viz_show_target.toggled.connect(self.update_3d_visualization)
+        controls_layout.addWidget(self.viz_show_target)
+
+        refresh_btn = QPushButton("Refresh View")
+        refresh_btn.clicked.connect(self.update_3d_visualization)
+        controls_layout.addWidget(refresh_btn)
+
+        reset_view_btn = QPushButton("Reset Camera")
+        reset_view_btn.clicked.connect(self.reset_3d_view)
+        controls_layout.addWidget(reset_view_btn)
+
+        controls_layout.addStretch()
+
+        layout.addWidget(controls_group)
+
+        # Info panel
+        info_group = QGroupBox("Arm Information")
+        info_layout = QHBoxLayout(info_group)
+
+        self.viz_info_label = QLabel("End Effector Position: (0.0, 0.0, 0.0) mm")
+        info_layout.addWidget(self.viz_info_label)
+
+        layout.addWidget(info_group)
+
+        # Matplotlib 3D canvas
+        self.viz_figure = Figure(figsize=(8, 8))
+        self.viz_canvas = FigureCanvas(self.viz_figure)
+        self.viz_ax = self.viz_figure.add_subplot(111, projection='3d')
+
+        layout.addWidget(self.viz_canvas)
+
+        # Initialize the plot
+        self.update_3d_visualization()
 
         return tab
 
@@ -929,6 +995,105 @@ class AsgardEnhanced(QMainWindow):
         self.log_console(f"Moving to position ({target.x:.1f}, {target.y:.1f}, {target.z:.1f})")
         self.ik_status_label.setText("✓ Movement commands sent")
         self.ik_status_label.setStyleSheet("color: green;")
+
+        # Update 3D visualization if auto-update is enabled
+        if hasattr(self, 'viz_auto_update') and self.viz_auto_update.isChecked():
+            self.update_3d_visualization()
+
+    # 3D Visualization methods
+
+    def on_joint_changed(self):
+        """Called when a joint value changes"""
+        # Only update if auto-update is enabled and visualization tab exists
+        if hasattr(self, 'viz_auto_update') and self.viz_auto_update.isChecked():
+            self.update_3d_visualization()
+
+    def update_3d_visualization(self):
+        """Update 3D arm visualization"""
+        # Get current joint angles from UI
+        current_angles = {joint_id: ctrl['spinbox'].value()
+                         for joint_id, ctrl in self.joint_controls.items()}
+
+        # Calculate forward kinematics to get joint positions
+        end_pos, joint_positions = self.kinematics.forward_kinematics(current_angles)
+
+        # Clear the plot
+        self.viz_ax.clear()
+
+        # Extract coordinates for plotting
+        x_coords = [p.x for p in joint_positions]
+        y_coords = [p.y for p in joint_positions]
+        z_coords = [p.z for p in joint_positions]
+
+        # Plot the arm links
+        self.viz_ax.plot(x_coords, y_coords, z_coords,
+                        'b-', linewidth=3, marker='o', markersize=8,
+                        label='Arm Links', markerfacecolor='red')
+
+        # Highlight base
+        self.viz_ax.scatter([0], [0], [0],
+                           c='green', s=200, marker='s',
+                           label='Base', edgecolors='black', linewidths=2)
+
+        # Highlight end effector
+        self.viz_ax.scatter([end_pos.x], [end_pos.y], [end_pos.z],
+                           c='orange', s=200, marker='^',
+                           label='End Effector', edgecolors='black', linewidths=2)
+
+        # Show IK target if enabled and available
+        if self.viz_show_target.isChecked() and self.ik_solution:
+            target_x = self.ik_x_spin.value()
+            target_y = self.ik_y_spin.value()
+            target_z = self.ik_z_spin.value()
+            self.viz_ax.scatter([target_x], [target_y], [target_z],
+                               c='cyan', s=150, marker='*',
+                               label='IK Target', edgecolors='black', linewidths=1)
+
+        # Show workspace bounds if enabled
+        if self.viz_show_workspace.isChecked():
+            bounds = self.kinematics.get_workspace_bounds()
+            max_reach = bounds['x'][1]
+
+            # Draw workspace sphere (approximate)
+            u = np.linspace(0, 2 * np.pi, 20)
+            v = np.linspace(0, np.pi, 20)
+            x = max_reach * np.outer(np.cos(u), np.sin(v))
+            y = max_reach * np.outer(np.sin(u), np.sin(v))
+            z = max_reach * np.outer(np.ones(np.size(u)), np.cos(v))
+
+            self.viz_ax.plot_surface(x, y, z, alpha=0.1, color='gray')
+
+        # Set labels and title
+        self.viz_ax.set_xlabel('X (mm)', fontsize=10)
+        self.viz_ax.set_ylabel('Y (mm)', fontsize=10)
+        self.viz_ax.set_zlabel('Z (mm)', fontsize=10)
+        self.viz_ax.set_title('Thor Arm - 3D Visualization', fontsize=12, fontweight='bold')
+
+        # Set equal aspect ratio
+        max_range = 600  # mm
+        self.viz_ax.set_xlim([-max_range, max_range])
+        self.viz_ax.set_ylim([-max_range, max_range])
+        self.viz_ax.set_zlim([0, max_range])
+
+        # Add grid
+        self.viz_ax.grid(True, alpha=0.3)
+
+        # Add legend
+        self.viz_ax.legend(loc='upper right', fontsize=9)
+
+        # Update info label
+        self.viz_info_label.setText(
+            f"End Effector: ({end_pos.x:.1f}, {end_pos.y:.1f}, {end_pos.z:.1f}) mm  |  "
+            f"Reach: {(end_pos.x**2 + end_pos.y**2 + end_pos.z**2)**0.5:.1f} mm"
+        )
+
+        # Redraw canvas
+        self.viz_canvas.draw()
+
+    def reset_3d_view(self):
+        """Reset 3D view to default angle"""
+        self.viz_ax.view_init(elev=20, azim=45)
+        self.viz_canvas.draw()
 
     # Kinect methods
 
