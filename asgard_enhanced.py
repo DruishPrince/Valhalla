@@ -875,8 +875,13 @@ class AsgardEnhanced(QMainWindow):
         layout.addWidget(axis_lock_group)
 
         # Matplotlib quad view canvas (like 3D Studio Max)
-        self.viz_figure = Figure(figsize=(12, 10))
+        # Use larger figure size to prevent cramping
+        self.viz_figure = Figure(figsize=(14, 12), dpi=80)
         self.viz_canvas = FigureCanvas(self.viz_figure)
+
+        # Set better spacing between subplots to prevent overlap
+        self.viz_figure.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05,
+                                        hspace=0.25, wspace=0.25)
 
         # Create 2x2 grid of subplots
         # Top-left: Top view (XY plane)
@@ -1814,15 +1819,27 @@ class AsgardEnhanced(QMainWindow):
                           edgecolors='yellow', linewidths=2,
                           label='Target' if not self.viz_dragging else 'Dragging...')
 
-            # Set axis limits
+            # Set axis limits (FIXED - never change during dragging)
             ax.set_xlim([-max_range, max_range])
             ax.set_ylim([-max_range, max_range])
             ax.set_zlim([0, max_range])
 
+            # CRITICAL: Set equal aspect ratio to prevent scrunching
+            # This ensures 1mm in X = 1mm in Y = 1mm in Z visually
+            try:
+                # For newer matplotlib versions
+                ax.set_box_aspect([2, 2, 1])  # X:Y:Z aspect ratio (Z is half range)
+            except AttributeError:
+                # For older matplotlib versions
+                pass
+
+            # Disable autoscaling to prevent view changes during updates
+            ax.set_autoscale_on(False)
+
             # Set axis labels
-            ax.set_xlabel('X', fontsize=8)
-            ax.set_ylabel('Y', fontsize=8)
-            ax.set_zlabel('Z', fontsize=8)
+            ax.set_xlabel('X (mm)', fontsize=8)
+            ax.set_ylabel('Y (mm)', fontsize=8)
+            ax.set_zlabel('Z (mm)', fontsize=8)
 
             # Add grid
             ax.grid(True, alpha=0.3)
@@ -1856,7 +1873,8 @@ class AsgardEnhanced(QMainWindow):
         )
 
         # Redraw canvas
-        self.viz_figure.tight_layout(pad=1.5)
+        # Don't use tight_layout during updates - it causes dynamic resizing/scrunching
+        # We use fixed subplots_adjust() set during initialization instead
         self.viz_canvas.draw()
 
     def reset_3d_view(self):
