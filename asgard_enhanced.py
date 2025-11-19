@@ -536,7 +536,8 @@ class AsgardEnhanced(QMainWindow):
         if self.kinect is None:
             self.kinect = KinectInterface()
             if self.kinect.open():
-                self.kinect_version_label.setText(f"Version: {self.kinect.version.value}")
+                version_text = self.kinect.version.value if self.kinect.version else "Unknown"
+                self.kinect_version_label.setText(f"Version: {version_text}")
                 self.vision_3d = VisionController3D(self.kinect)
 
                 # Start worker thread
@@ -820,7 +821,7 @@ class AsgardEnhanced(QMainWindow):
             self.robot_status_label.setStyleSheet("color: red;")
 
         # Kinect status
-        if self.kinect:
+        if self.kinect and self.kinect.version:
             self.kinect_status_label.setText(f"Kinect: {self.kinect.version.value} ✓")
             self.kinect_status_label.setStyleSheet("color: green;")
         else:
