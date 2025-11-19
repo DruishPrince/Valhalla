@@ -1,0 +1,14 @@
+# Core GUI Framework
+PyQt5>=5.15.0
+
+# Serial Communication
+pyserial>=3.5
+
+# Computer Vision
+opencv-python>=4.5.0
+opencv-contrib-python>=4.5.0
+numpy>=1.21.0
+
+# Optional: For advanced vision features
+# scikit-image>=0.18.0
+# pillow>=8.0.0
