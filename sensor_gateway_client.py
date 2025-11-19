@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from sensor_manager import JointFeedback
 from adxl345_sensor import Orientation
-from kinematics import Vector3D
+from kinematics import Point3D
 
 
 @dataclass
@@ -255,7 +255,7 @@ class SensorGatewayClient:
                         joint_id=joint_id,
                         joint_name=joint_id,  # Gateway doesn't send name
                         measured_angle=joint_data.get('angle', 0.0),
-                        acceleration=Vector3D(
+                        acceleration=Point3D(
                             x=joint_data.get('accel_x', 0.0),
                             y=joint_data.get('accel_y', 0.0),
                             z=joint_data.get('accel_z', 0.0)
