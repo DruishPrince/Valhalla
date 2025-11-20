@@ -4,6 +4,9 @@ PyQt5>=5.15.0
 # Serial Communication
 pyserial>=3.5
 
+# Network Communication (for Klipper/Moonraker API)
+requests>=2.25.0
+
 # Computer Vision
 opencv-python>=4.5.0
 opencv-contrib-python>=4.5.0
