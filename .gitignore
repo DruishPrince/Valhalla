@@ -1,8 +1,10 @@
-# Python
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -20,10 +22,8 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-venv/
-env/
-ENV/
+# PyQt
+*.ui~
 
 # IDE
 .vscode/
@@ -35,7 +35,3 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-
-# Project specific
-*.log
-config/*.local.json
