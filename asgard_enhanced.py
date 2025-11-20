@@ -48,6 +48,8 @@ from config_manager import (
     get_config, get_serial_config, get_kinect_config,
     get_sensor_gateway_config, get_board_config
 )
+from klipper_controller import KlipperController, KlipperState
+from fly_super8_config import FLYSuper8ProConfig, FirmwareType, DriverType
 
 
 class ImageDisplayWidget(QLabel):
@@ -510,7 +512,9 @@ class AsgardEnhanced(QMainWindow):
         self.setGeometry(100, 100, 1400, 900)
 
         # Initialize components
-        self.robot = RobotController()
+        self.fly_config = FLYSuper8ProConfig()  # FLY Super 8 Pro board configuration
+        self.klipper_controller: Optional[KlipperController] = None  # Optional Klipper backend
+        self.robot = RobotController()  # Main robot controller (with optional backend)
         self.kinect: Optional[KinectInterface] = None
         self.kinect_worker: Optional[KinectWorker] = None
         self.vision_3d: Optional[VisionController3D] = None
@@ -1152,10 +1156,101 @@ class AsgardEnhanced(QMainWindow):
         self.board_combo = QComboBox()
         self.board_combo.addItems(["FLY Super ♾️ Pro", "Generic GRBL"])
         self.board_combo.setCurrentIndex(0)  # FLY Super ♾️ Pro as default
+        self.board_combo.currentIndexChanged.connect(self.on_board_changed)
         board_layout.addWidget(self.board_combo)
         board_layout.addStretch()
 
         layout.addWidget(board_group)
+
+        # FLY Super 8 Pro Advanced Settings (only visible when FLY board selected)
+        self.fly_settings_group = QGroupBox("FLY Super 8 Pro Advanced Settings")
+        fly_layout = QGridLayout(self.fly_settings_group)
+
+        # Firmware selection
+        fly_layout.addWidget(QLabel("Firmware Type:"), 0, 0)
+        self.firmware_combo = QComboBox()
+        self.firmware_combo.addItems(["Klipper", "GRBL", "Reprap", "Marlin"])
+        self.firmware_combo.setCurrentText("Klipper")  # Default to Klipper for FLY board
+        self.firmware_combo.currentTextChanged.connect(self.on_firmware_changed)
+        fly_layout.addWidget(self.firmware_combo, 0, 1)
+
+        # Baud rate selection (up to 1.5M for FLY board)
+        fly_layout.addWidget(QLabel("Baud Rate:"), 0, 2)
+        self.baudrate_combo = QComboBox()
+        self.baudrate_combo.addItems([
+            "115200", "250000", "500000 (Recommended)",
+            "1000000", "1500000 (Maximum)"
+        ])
+        self.baudrate_combo.setCurrentText("500000 (Recommended)")
+        fly_layout.addWidget(self.baudrate_combo, 0, 3)
+
+        # Motor voltage selection
+        fly_layout.addWidget(QLabel("Motor Voltage:"), 1, 0)
+        self.motor_voltage_combo = QComboBox()
+        self.motor_voltage_combo.addItems(["12V", "24V (Recommended)", "48V"])
+        self.motor_voltage_combo.setCurrentText("24V (Recommended)")
+        fly_layout.addWidget(self.motor_voltage_combo, 1, 1)
+
+        # Network/Wireless control (Klipper only)
+        self.use_network_check = QCheckBox("Use Network Control (Wireless)")
+        self.use_network_check.setToolTip("Enable Moonraker API for wireless control (Klipper only)")
+        fly_layout.addWidget(self.use_network_check, 1, 2, 1, 2)
+
+        # Moonraker host (shown when network enabled)
+        fly_layout.addWidget(QLabel("Moonraker Host:"), 2, 0)
+        self.moonraker_host_edit = QLineEdit()
+        self.moonraker_host_edit.setText("127.0.0.1")
+        self.moonraker_host_edit.setEnabled(False)
+        self.use_network_check.toggled.connect(self.moonraker_host_edit.setEnabled)
+        fly_layout.addWidget(self.moonraker_host_edit, 2, 1)
+
+        # TMC Driver Configuration
+        tmc_group = QGroupBox("TMC Stepper Driver Settings")
+        tmc_layout = QGridLayout(tmc_group)
+
+        tmc_layout.addWidget(QLabel("Run Current:"), 0, 0)
+        self.tmc_run_current = QDoubleSpinBox()
+        self.tmc_run_current.setRange(0.1, 2.0)
+        self.tmc_run_current.setSingleStep(0.1)
+        self.tmc_run_current.setSuffix(" A")
+        self.tmc_run_current.setValue(0.8)
+        tmc_layout.addWidget(self.tmc_run_current, 0, 1)
+
+        tmc_layout.addWidget(QLabel("Hold Current:"), 0, 2)
+        self.tmc_hold_current = QDoubleSpinBox()
+        self.tmc_hold_current.setRange(0.1, 2.0)
+        self.tmc_hold_current.setSingleStep(0.1)
+        self.tmc_hold_current.setSuffix(" A")
+        self.tmc_hold_current.setValue(0.4)
+        tmc_layout.addWidget(self.tmc_hold_current, 0, 3)
+
+        tmc_layout.addWidget(QLabel("Microsteps:"), 1, 0)
+        self.tmc_microsteps = QComboBox()
+        self.tmc_microsteps.addItems(["8", "16", "32", "64", "128", "256"])
+        self.tmc_microsteps.setCurrentText("16")
+        tmc_layout.addWidget(self.tmc_microsteps, 1, 1)
+
+        self.tmc_stealthchop = QCheckBox("StealthChop (Quiet Mode)")
+        self.tmc_stealthchop.setChecked(True)
+        self.tmc_stealthchop.setToolTip("Enable quiet operation mode")
+        tmc_layout.addWidget(self.tmc_stealthchop, 1, 2, 1, 2)
+
+        fly_layout.addWidget(tmc_group, 3, 0, 1, 4)
+
+        # Apply and Generate Config buttons
+        fly_buttons = QHBoxLayout()
+        apply_fly_btn = QPushButton("Apply FLY Settings")
+        apply_fly_btn.clicked.connect(self.apply_fly_settings)
+        fly_buttons.addWidget(apply_fly_btn)
+
+        generate_klipper_btn = QPushButton("Generate Klipper Config File")
+        generate_klipper_btn.clicked.connect(self.generate_klipper_config)
+        fly_buttons.addWidget(generate_klipper_btn)
+        fly_buttons.addStretch()
+
+        fly_layout.addLayout(fly_buttons, 4, 0, 1, 4)
+
+        layout.addWidget(self.fly_settings_group)
 
         # Robot Dimensions Configuration
         dimensions_group = QGroupBox("Robot Physical Dimensions (for IK)")
@@ -1463,13 +1558,34 @@ class AsgardEnhanced(QMainWindow):
             self.robot.disconnect()
             self.connect_btn.setText("Connect")
             self.log_console("Robot disconnected")
+            # Trigger plugin event
+            self.plugin_manager.trigger_robot_disconnected()
         else:
             port = self.port_combo.currentText()
-            if self.robot.connect(port, 115200):
+
+            # Get baud rate and network settings from FLY config
+            baudrate = self.fly_config.baudrate
+            use_network = self.fly_config.klipper_config.get('use_network', False)
+            network_host = self.fly_config.klipper_config.get('host', '127.0.0.1')
+
+            # Connect with appropriate settings
+            if self.robot.connect(port, baudrate, use_network=use_network, network_host=network_host):
                 self.connect_btn.setText("Disconnect")
-                self.log_console(f"Robot connected on {port}")
+
+                # Show connection info
+                if use_network:
+                    self.log_console(f"Robot connected via network (Moonraker @ {network_host})")
+                else:
+                    self.log_console(f"Robot connected on {port} @ {baudrate:,} baud")
+
+                # Trigger plugin event
+                self.plugin_manager.trigger_robot_connected()
             else:
-                QMessageBox.warning(self, "Connection Error", "Failed to connect to robot")
+                QMessageBox.warning(self, "Connection Error",
+                                  f"Failed to connect to robot.\n\n"
+                                  f"Port: {port}\n"
+                                  f"Baud: {baudrate:,}\n"
+                                  f"Network: {use_network}")
 
     def toggle_kinect_connection(self):
         """Connect/disconnect Kinect"""
@@ -2529,6 +2645,130 @@ class AsgardEnhanced(QMainWindow):
         )
 
         self.log_console("Joint limits updated")
+
+    def on_board_changed(self, index: int):
+        """Handle board type change - show/hide FLY settings"""
+        is_fly_board = (index == 0)  # 0 = FLY Super 8 Pro
+        self.fly_settings_group.setVisible(is_fly_board)
+
+    def on_firmware_changed(self, firmware: str):
+        """Handle firmware type change - enable/disable network control"""
+        # Network control only available for Klipper
+        is_klipper = (firmware == "Klipper")
+        self.use_network_check.setEnabled(is_klipper)
+        if not is_klipper:
+            self.use_network_check.setChecked(False)
+
+    def apply_fly_settings(self):
+        """Apply FLY Super 8 Pro settings"""
+        # Update FLY configuration
+        firmware_text = self.firmware_combo.currentText().lower()
+        self.fly_config.firmware = FirmwareType(firmware_text)
+
+        # Extract baud rate from combo text (e.g., "500000 (Recommended)" -> 500000)
+        baudrate_text = self.baudrate_combo.currentText().split()[0]
+        self.fly_config.baudrate = int(baudrate_text)
+
+        # Motor voltage
+        voltage_text = self.motor_voltage_combo.currentText()
+        self.fly_config.motor_voltage = int(voltage_text.replace('V', '').split()[0])
+
+        # TMC settings
+        self.fly_config.tmc_settings['run_current'] = self.tmc_run_current.value()
+        self.fly_config.tmc_settings['hold_current'] = self.tmc_hold_current.value()
+        self.fly_config.tmc_settings['microsteps'] = int(self.tmc_microsteps.currentText())
+        self.fly_config.tmc_settings['stealthchop'] = self.tmc_stealthchop.isChecked()
+
+        # Network settings
+        self.fly_config.klipper_config['use_network'] = self.use_network_check.isChecked()
+        self.fly_config.klipper_config['host'] = self.moonraker_host_edit.text()
+
+        # If Klipper firmware selected, create Klipper controller backend
+        if self.fly_config.firmware == FirmwareType.KLIPPER:
+            use_network = self.use_network_check.isChecked()
+            self.klipper_controller = KlipperController(use_network=use_network)
+
+            # Reconnect robot controller with Klipper backend
+            if self.robot.is_connected():
+                # Disconnect current connection
+                self.robot.disconnect()
+
+            # Create new robot controller with Klipper backend
+            self.robot = RobotController(firmware_backend=self.klipper_controller)
+            self.sequencer.robot = self.robot  # Update sequencer reference
+
+            QMessageBox.information(
+                self,
+                "Klipper Backend Enabled",
+                f"FLY Super 8 Pro configured with Klipper firmware!\n\n"
+                f"Baud Rate: {self.fly_config.baudrate:,} (high-speed)\n"
+                f"Network Control: {'Enabled' if use_network else 'Disabled'}\n"
+                f"TMC Run Current: {self.fly_config.tmc_settings['run_current']} A\n"
+                f"StealthChop: {'Enabled' if self.fly_config.tmc_settings['stealthchop'] else 'Disabled'}\n\n"
+                f"Click 'Connect' to connect with these settings."
+            )
+        else:
+            # Using standard GRBL/Reprap/Marlin
+            self.klipper_controller = None
+            if self.robot.firmware_backend:
+                # Disconnect and reset to standard controller
+                if self.robot.is_connected():
+                    self.robot.disconnect()
+                self.robot = RobotController()
+                self.sequencer.robot = self.robot
+
+            QMessageBox.information(
+                self,
+                "FLY Settings Applied",
+                f"FLY Super 8 Pro configured with {firmware_text.upper()} firmware!\n\n"
+                f"Baud Rate: {self.fly_config.baudrate:,}\n"
+                f"Motor Voltage: {self.fly_config.motor_voltage}V\n\n"
+                f"Click 'Connect' to connect with these settings."
+            )
+
+        self.log_console(f"FLY Super 8 Pro configured: {firmware_text.upper()} @ {self.fly_config.baudrate:,} baud")
+
+    def generate_klipper_config(self):
+        """Generate and save Klipper configuration file"""
+        # Update config from UI
+        self.fly_config.tmc_settings['run_current'] = self.tmc_run_current.value()
+        self.fly_config.tmc_settings['hold_current'] = self.tmc_hold_current.value()
+        self.fly_config.tmc_settings['microsteps'] = int(self.tmc_microsteps.currentText())
+        self.fly_config.tmc_settings['stealthchop'] = self.tmc_stealthchop.isChecked()
+
+        # Generate config
+        klipper_config_text = self.fly_config.generate_klipper_config()
+
+        # Ask where to save
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Klipper Configuration",
+            "printer.cfg",
+            "Klipper Config (*.cfg);;All Files (*)"
+        )
+
+        if filename:
+            try:
+                with open(filename, 'w') as f:
+                    f.write(klipper_config_text)
+
+                QMessageBox.information(
+                    self,
+                    "Config Generated",
+                    f"Klipper configuration saved to:\n{filename}\n\n"
+                    f"Copy this file to your Klipper installation\n"
+                    f"(typically ~/printer_data/config/printer.cfg)\n"
+                    f"and restart Klipper."
+                )
+
+                self.log_console(f"Klipper config generated: {filename}")
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error Saving Config",
+                    f"Failed to save configuration:\n{str(e)}"
+                )
+                self.log_console(f"Error generating Klipper config: {e}")
 
     def reload_configuration(self):
         """Reload configuration from file"""

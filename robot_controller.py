@@ -1,6 +1,12 @@
 """
 Robot Controller Module
 Handles all robot commands, state management, and communication logic
+
+Supports multiple firmware backends:
+- GRBL (default)
+- Klipper (high-speed via KlipperController)
+- Reprap
+- Marlin
 """
 import serial
 from typing import Optional, Dict, List, Tuple
@@ -27,6 +33,8 @@ class RobotController:
     """
     Manages robot state, command generation, and serial communication
     for the Thor 6-axis robotic arm.
+
+    Supports multiple firmware backends via dependency injection.
     """
 
     # Joint angle limits (degrees)
@@ -40,8 +48,16 @@ class RobotController:
         'Z': (-180, 180),  # Gripper rotation
     }
 
-    def __init__(self):
+    def __init__(self, firmware_backend=None):
+        """
+        Initialize robot controller
+
+        Args:
+            firmware_backend: Optional backend controller (e.g., KlipperController)
+                             If None, uses direct serial GRBL control
+        """
         self.serial_port: Optional[serial.Serial] = None
+        self.firmware_backend = firmware_backend  # Optional Klipper/other backend
         self.current_state = RobotState.DISCONNECTED
         self.current_position = {
             'A': 0.0, 'B': 0.0, 'C': 0.0,
@@ -50,23 +66,41 @@ class RobotController:
         self.gripper_position = 0  # 0-100%
         self.default_feedrate = 500  # degrees/min
 
-    def connect(self, port: str, baudrate: int = 115200, timeout: float = 1.0) -> bool:
+    def connect(self, port: str, baudrate: int = 115200, timeout: float = 1.0,
+                use_network: bool = False, network_host: str = "127.0.0.1") -> bool:
         """
-        Connect to the robot via serial port
+        Connect to the robot via serial port or network
 
         Args:
             port: Serial port name (e.g., '/dev/ttyUSB0', 'COM3')
-            baudrate: Communication speed (default 115200)
+            baudrate: Communication speed (default 115200, up to 1500000 for FLY board)
             timeout: Read timeout in seconds
+            use_network: Use network connection (Klipper/Moonraker)
+            network_host: Network host for Klipper (default localhost)
 
         Returns:
             True if connection successful, False otherwise
         """
         try:
+            # If using firmware backend (e.g., Klipper)
+            if self.firmware_backend:
+                if use_network:
+                    # Network connection for Klipper
+                    success = self.firmware_backend.connect_network(network_host)
+                else:
+                    # High-speed serial for Klipper
+                    success = self.firmware_backend.connect_serial(port, baudrate)
+
+                if success:
+                    self.current_state = RobotState.READY
+                return success
+
+            # Standard GRBL serial connection
             if self.serial_port and self.serial_port.is_open:
                 self.serial_port.close()
 
             self.serial_port = serial.Serial(port, baudrate, timeout=timeout)
+            self.current_state = RobotState.READY
             return True
         except Exception as e:
             print(f"Connection error: {e}")
@@ -74,12 +108,16 @@ class RobotController:
 
     def disconnect(self):
         """Close serial connection"""
-        if self.serial_port and self.serial_port.is_open:
+        if self.firmware_backend:
+            self.firmware_backend.disconnect()
+        elif self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
         self.current_state = RobotState.DISCONNECTED
 
     def is_connected(self) -> bool:
         """Check if robot is connected"""
+        if self.firmware_backend:
+            return self.firmware_backend.is_connected()
         return self.serial_port is not None and self.serial_port.is_open
 
     def validate_angle(self, joint: str, angle: float) -> Tuple[bool, float]:
@@ -234,6 +272,11 @@ class RobotController:
             return False
 
         try:
+            # Use firmware backend if available (Klipper, etc.)
+            if self.firmware_backend:
+                return self.firmware_backend.send_gcode(command)
+
+            # Standard GRBL serial
             # Add newline if not present
             if not command.endswith('\n'):
                 command += '\n'
