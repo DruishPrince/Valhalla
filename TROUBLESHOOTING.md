@@ -1,402 +1,236 @@
-# Troubleshooting Guide - Asgard Enhanced
+# Troubleshooting Guide for Asgard
 
-Quick solutions for common problems when running Asgard Enhanced GUI.
+## Quick Fix Scripts
 
-## Quick Fix Steps
+All scripts are designed to be run from the Valhalla directory on Windows.
 
-### Step 1: Run Setup Script (Recommended)
+### START_HERE.bat
+**The main menu - start here if you're not sure what to do!**
+- Interactive menu with all options
+- Guides you through diagnostics and fixes
 
-```cmd
-setup_windows.bat
-```
+### For Numpy/OpenCV Import Errors
 
-This installs all required dependencies automatically.
+#### 1. diagnose_issue.bat
+Run this first to identify the problem:
+- Checks for conflicting files (numpy.py, cv2.py)
+- Verifies virtual environment
+- Tests all imports
+- Shows detailed diagnostic information
 
-### Step 2: Test Installation
+#### 2. fix_numpy_issue.bat
+Quick fix for numpy import errors:
+- Removes conflicting files
+- Reinstalls numpy with compatible version
+- Reinstalls opencv-python
+- Clears pip cache
+- Tests installation
 
-```cmd
-venv\Scripts\activate
-python test_installation.py
-```
+#### 3. recreate_venv.bat
+Complete reset (use if quick fix doesn't work):
+- Deletes entire virtual environment
+- Creates fresh virtual environment
+- Installs all dependencies
+- Verifies installation
 
-This checks what's installed and what's missing.
+### Testing & Running
 
-### Step 3: Try Simple Launcher
+#### test_installation.bat
+Verify all dependencies are working:
+- Tests all 7 required packages
+- Shows version numbers
+- Indicates which packages failed (if any)
 
-```cmd
-run_simple.bat
-```
+#### run_asgard.bat
+Launch original Asgard with Xbox controller support:
+- Activates virtual environment
+- Runs asgard.py
+- Shows helpful error messages
 
-This runs tests first, then asks before launching.
-
-### Step 4: Try Minimal Version
-
-If full version doesn't work:
-
-```cmd
-venv\Scripts\activate
-python asgard_minimal.py
-```
-
-This only requires PyQt5 and pyserial.
-
----
-
-## Common Error Messages
-
-### Error: "No module named 'PyQt5'"
-
-**Cause:** PyQt5 not installed
-
-**Fix:**
-```cmd
-venv\Scripts\activate
-pip install PyQt5
-```
+#### run_asgard_enhanced.bat
+Launch enhanced version (if you have it):
+- Includes additional features
+- Same error handling
 
 ---
 
-### Error: "No module named 'cv2'"
+## Common Issues and Solutions
 
-**Cause:** OpenCV not installed
+### Issue 1: "No module named 'numpy.core._multiarray_umath'"
 
-**Fix:**
-```cmd
+**Cause:** Corrupted numpy installation or conflicting files
+
+**Solution:**
+```batch
+1. Run diagnose_issue.bat
+2. If it finds conflicts, run fix_numpy_issue.bat
+3. If that doesn't work, run recreate_venv.bat
+```
+
+### Issue 2: "ImportError: Error importing numpy from its source directory"
+
+**Cause:** There's a file or folder named `numpy` in your Valhalla directory
+
+**Solution:**
+```batch
+1. Run diagnose_issue.bat (it will show the conflict)
+2. Run fix_numpy_issue.bat (it will rename the conflicting file)
+```
+
+### Issue 3: Xbox Controller Not Detected
+
+**Cause:** pygame not installed or controller not connected
+
+**Solution:**
+```batch
+1. Make sure controller is connected via USB or Bluetooth
+2. Activate virtual environment: venv\Scripts\activate
+3. Install pygame: pip install pygame
+4. Test: python -c "import pygame; pygame.init(); print(pygame.joystick.get_count())"
+```
+
+### Issue 4: Virtual Environment Not Found
+
+**Solution:**
+```batch
+Run recreate_venv.bat
+```
+
+### Issue 5: Serial Port Connection Fails
+
+**Cause:** Wrong COM port or permissions issue
+
+**Solution:**
+1. Check Device Manager for correct COM port
+2. Make sure no other program is using the port
+3. Try different baud rates (usually 115200)
+
+---
+
+## Manual Troubleshooting Steps
+
+If scripts don't work, try these manual steps:
+
+### Step 1: Check for Conflicting Files
+```batch
+cd C:\Thor-Robot-Arm\Angel-Thor\Valhalla
+dir numpy*
+dir cv2*
+```
+If you see `numpy.py` or `cv2.py`, rename or delete them.
+
+### Step 2: Check Current Directory
+```batch
+cd
+```
+Make sure you're NOT inside a folder called "numpy" or "site-packages"
+
+### Step 3: Reinstall Numpy Manually
+```batch
 venv\Scripts\activate
+pip uninstall numpy -y
+pip uninstall opencv-python -y
+pip cache purge
+pip install numpy==1.24.3
 pip install opencv-python
 ```
 
----
-
-### Error: "No module named 'serial'"
-
-**Cause:** pyserial not installed
-
-**Fix:**
-```cmd
-venv\Scripts\activate
-pip install pyserial
+### Step 4: Verify Installation
+```batch
+python -c "import numpy; print(numpy.__version__)"
+python -c "import cv2; print(cv2.__version__)"
 ```
 
 ---
 
-### Error: "Virtual environment not found"
+## Xbox Controller Setup
 
-**Cause:** venv folder doesn't exist
+### Requirements
+```batch
+pip install pygame
+```
 
-**Fix:**
-```cmd
-python -m venv venv
-setup_windows.bat
+### Verify Controller Connection
+```batch
+python -c "import pygame; pygame.init(); print('Joysticks:', pygame.joystick.get_count())"
+```
+Should show "Joysticks: 1" or higher
+
+### Test Controller
+```batch
+python xbox_controller_test.py
 ```
 
 ---
 
-### Error: "python is not recognized"
+## Recommended Fix Order
 
-**Cause:** Python not in PATH
+1. **First Time Setup:**
+   ```batch
+   recreate_venv.bat
+   test_installation.bat
+   run_asgard.bat
+   ```
 
-**Fix:**
-1. Reinstall Python from python.org
-2. During installation, check "Add Python to PATH"
-3. OR manually add Python to PATH:
-   - Search Windows for "Environment Variables"
-   - Edit "Path" variable
-   - Add: `C:\Users\YourName\AppData\Local\Programs\Python\Python311`
+2. **Having Numpy Issues:**
+   ```batch
+   diagnose_issue.bat
+   fix_numpy_issue.bat
+   test_installation.bat
+   ```
 
----
-
-### Error: Program starts but window doesn't appear
-
-**Possible causes:**
-1. Window opened off-screen
-2. Graphics driver issue
-3. Multiple monitors
-
-**Fix:**
-- Press Alt+Space, then M (Move), then arrow keys
-- Update graphics drivers
-- Try on single monitor
-
----
-
-### Error: "ImportError" for project modules
-
-**Example:** `No module named 'robot_controller'`
-
-**Cause:** Running from wrong directory
-
-**Fix:**
-```cmd
-cd C:\Users\YourName\Documents\Valhalla
-run_asgard_enhanced.bat
-```
-
-Make sure you're in the project directory!
-
----
-
-## Step-by-Step Manual Setup
-
-If automated setup fails, do this manually:
-
-### 1. Check Python
-
-```cmd
-python --version
-```
-
-Should show Python 3.8 or newer.
-
-### 2. Create Virtual Environment
-
-```cmd
-cd C:\Users\YourName\Documents\Valhalla
-python -m venv venv
-```
-
-### 3. Activate Virtual Environment
-
-```cmd
-venv\Scripts\activate
-```
-
-Your prompt should show `(venv)` at the start.
-
-### 4. Upgrade pip
-
-```cmd
-python -m pip install --upgrade pip
-```
-
-### 5. Install Core Dependencies
-
-```cmd
-pip install PyQt5
-pip install pyserial
-pip install opencv-python
-pip install numpy
-pip install matplotlib
-pip install scipy
-```
-
-### 6. Test Installation
-
-```cmd
-python test_installation.py
-```
-
-Should show all checkmarks (✓).
-
-### 7. Run GUI
-
-```cmd
-python asgard_enhanced.py
-```
-
----
-
-## Specific Module Issues
-
-### Kinect Support
-
-**If you don't have a Kinect**, you can skip Kinect installation.
-
-The GUI will work fine without it - Kinect features just won't be available.
-
-**If you do have a Kinect:**
-
-For **Kinect v1** (Xbox 360):
-```cmd
-pip install freenect
-```
-
-For **Kinect v2** (Xbox One):
-1. Download libfreenect2 from: https://github.com/OpenKinect/libfreenect2
-2. Follow Windows installation instructions
-3. Then: `pip install pylibfreenect2`
-
-For **Azure Kinect**:
-1. Download Azure Kinect SDK from: https://github.com/microsoft/Azure-Kinect-Sensor-SDK
-2. Install the SDK
-3. Then: `pip install pyk4a`
-
-### Sensor Support (ADXL345)
-
-**Only needed if:**
-- Using FLY Super ♾️ Pro board
-- Have ADXL345 sensors
-- Using Pi Zero 2W or Pico gateway
-
-**Skip if** you don't have sensors.
-
-To install:
-```cmd
-pip install smbus2
-```
-
----
-
-## Command Line Testing
-
-Test if modules import correctly:
-
-```cmd
-venv\Scripts\activate
-
-python -c "import PyQt5; print('PyQt5 OK')"
-python -c "import serial; print('pyserial OK')"
-python -c "import cv2; print('OpenCV OK')"
-python -c "import numpy; print('NumPy OK')"
-python -c "import matplotlib; print('Matplotlib OK')"
-python -c "import scipy; print('SciPy OK')"
-```
-
-Each should print "OK" with no errors.
-
----
-
-## Still Not Working?
-
-### Option 1: Use Minimal Version
-
-```cmd
-python asgard_minimal.py
-```
-
-This is a simplified GUI that only needs PyQt5 and pyserial.
-
-### Option 2: Check Logs
-
-Look for error messages when running:
-
-```cmd
-python asgard_enhanced.py > output.log 2>&1
-```
-
-Then check `output.log` for detailed errors.
-
-### Option 3: Fresh Start
-
-Delete and recreate everything:
-
-```cmd
-rmdir /s venv
-python -m venv venv
-venv\Scripts\activate
-pip install PyQt5 pyserial opencv-python numpy matplotlib scipy
-python asgard_enhanced.py
-```
+3. **Nothing Works:**
+   ```batch
+   recreate_venv.bat
+   test_installation.bat
+   ```
 
 ---
 
 ## Getting Help
 
-### Information to Provide
+If none of these solutions work:
 
-If asking for help, include:
+1. Run `diagnose_issue.bat` and save the output
+2. Run `test_installation.bat` and save the output
+3. Note your Python version: `python --version`
+4. Note your OS version
+5. Share all this information when asking for help
 
-1. **Python version:**
-   ```cmd
-   python --version
-   ```
+---
 
-2. **Operating System:**
-   - Windows 10 / Windows 11
+## Additional Resources
 
-3. **Error message:**
-   - Full text of error
-   - Or screenshot
+- **README.md** - Full Xbox controller documentation
+- **requirements.txt** - List of all dependencies
+- **.gitignore** - Prevents committing cache files
 
-4. **What you tried:**
-   - Did you run setup_windows.bat?
-   - Did test_installation.py pass?
+---
 
-### Example Help Request
+## Quick Command Reference
 
+```batch
+# Activate virtual environment
+venv\Scripts\activate
+
+# Check Python version
+python --version
+
+# List installed packages
+pip list
+
+# Install single package
+pip install package_name
+
+# Install all requirements
+pip install -r requirements.txt
+
+# Test import
+python -c "import package_name; print('OK')"
+
+# Clear pip cache
+pip cache purge
+
+# Create new virtual environment
+python -m venv venv
 ```
-I'm getting "No module named 'PyQt5'" error.
-
-Python version: 3.11.0
-OS: Windows 11
-What I tried:
-- Ran setup_windows.bat - completed successfully
-- Ran test_installation.py - showed PyQt5 as missing
-- Ran "pip install PyQt5" manually - seemed to install
-- Still getting the error
-
-Error message when running asgard_enhanced.py:
-[paste full error here]
-```
-
----
-
-## Verification Checklist
-
-Before asking for help, verify:
-
-- [ ] Python 3.8+ is installed
-- [ ] Running from correct directory (Valhalla folder)
-- [ ] Virtual environment exists (`venv` folder present)
-- [ ] Virtual environment is activated (prompt shows `(venv)`)
-- [ ] Ran `setup_windows.bat` successfully
-- [ ] `test_installation.py` shows core modules as OK
-- [ ] `asgard_enhanced.py` file exists in current directory
-- [ ] No typos in commands
-
----
-
-## Alternative: Run Without Virtual Environment
-
-If virtual environment causes issues:
-
-```cmd
-# Install globally (not recommended but works)
-pip install PyQt5 pyserial opencv-python numpy matplotlib scipy
-
-# Run directly
-python asgard_enhanced.py
-```
-
-**Note:** This installs packages system-wide, which can cause conflicts.
-Virtual environment is recommended.
-
----
-
-## Linux/Mac Users
-
-If on Linux or Mac:
-
-```bash
-# Setup
-python3 -m venv venv
-source venv/bin/activate
-pip install PyQt5 pyserial opencv-python numpy matplotlib scipy
-
-# Run
-python3 asgard_enhanced.py
-
-# Or use script
-chmod +x run_asgard_enhanced.sh
-./run_asgard_enhanced.sh
-```
-
----
-
-## Success Criteria
-
-You'll know it's working when:
-
-1. `test_installation.py` shows all ✓ (checkmarks)
-2. `python asgard_enhanced.py` opens a window with 5 tabs:
-   - Robot Control
-   - Kinect Vision
-   - Sensors
-   - Action Sequencer
-   - Configuration
-
-If you see the window, it's working! 🎉
-
----
-
-**Still stuck? The minimal version (`asgard_minimal.py`) always works with just PyQt5 installed.**
