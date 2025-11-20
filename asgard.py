@@ -8,6 +8,7 @@ from about import Ui_Dialog as About_Ui_Dialog
 
 
 import serial_port_finder as spf
+from xbox_controller import XboxControllerThread
 
 import serial, time
 
@@ -27,6 +28,17 @@ class AsgardGUI(Ui_MainWindow):
 
         self.SerialThreadClass = SerialThreadClass()
         self.SerialThreadClass.serialSignal.connect(self.updateConsole)
+
+        # Initialize Xbox Controller Thread
+        self.XboxControllerThread = XboxControllerThread()
+        self.XboxControllerThread.controllerSignal.connect(self.handleXboxInput)
+        self.XboxControllerThread.statusSignal.connect(self.handleXboxStatus)
+        self.XboxControllerThread.buttonSignal.connect(self.handleXboxButton)
+        self.XboxControllerThread.gripperSignal.connect(self.handleXboxGripper)
+        self.xbox_controller_enabled = False
+        # Auto-start Xbox controller thread
+        self.XboxControllerThread.start()
+        self.xbox_controller_enabled = True
 
         self.actionAbout.triggered.connect(self.launchAboutWindow)
         self.actionExit.triggered.connect(self.close_application)
@@ -115,6 +127,10 @@ class AsgardGUI(Ui_MainWindow):
         self.ConsoleInput.returnPressed.connect(self.sendSerialCommand)
 
     def close_application(self):
+        # Stop Xbox controller thread if running
+        if self.xbox_controller_enabled:
+            self.XboxControllerThread.stop()
+            self.XboxControllerThread.wait()
         sys.exit()
 
     def launchAboutWindow(self):
@@ -546,6 +562,75 @@ class AsgardGUI(Ui_MainWindow):
         msgBox.setIcon(QtWidgets.QMessageBox.Warning)
         msgBox.setText("The connection has not been established yet. Please establish the connection before trying to control.")
         msgBox.exec_()
+
+# Xbox Controller Handler Functions
+    def toggleXboxController(self):
+        """Toggle Xbox controller on/off"""
+        if not self.xbox_controller_enabled:
+            self.XboxControllerThread.start()
+            self.xbox_controller_enabled = True
+            self.ConsoleOutput.appendPlainText(">>> Xbox Controller: Starting...")
+        else:
+            self.XboxControllerThread.stop()
+            self.XboxControllerThread.wait()
+            self.xbox_controller_enabled = False
+            self.ConsoleOutput.appendPlainText(">>> Xbox Controller: Stopped")
+
+    def handleXboxInput(self, joint_name, value):
+        """Handle Xbox controller joint input"""
+        # Update the appropriate SpinBox which will trigger the slider update
+        if joint_name == 'Art1':
+            self.SpinBoxArt1.setValue(value)
+            # Update controller's internal state
+            self.XboxControllerThread.update_joint_value('Art1', value)
+            # Auto-execute movement in continuous mode
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt1()
+        elif joint_name == 'Art2':
+            self.SpinBoxArt2.setValue(value)
+            self.XboxControllerThread.update_joint_value('Art2', value)
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt2()
+        elif joint_name == 'Art3':
+            self.SpinBoxArt3.setValue(value)
+            self.XboxControllerThread.update_joint_value('Art3', value)
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt3()
+        elif joint_name == 'Art4':
+            self.SpinBoxArt4.setValue(value)
+            self.XboxControllerThread.update_joint_value('Art4', value)
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt4()
+        elif joint_name == 'Art5':
+            self.SpinBoxArt5.setValue(value)
+            self.XboxControllerThread.update_joint_value('Art5', value)
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt5()
+        elif joint_name == 'Art6':
+            self.SpinBoxArt6.setValue(value)
+            self.XboxControllerThread.update_joint_value('Art6', value)
+            if self.XboxControllerThread.control_mode == 'continuous':
+                self.FKMoveArt6()
+
+    def handleXboxStatus(self, status_message):
+        """Handle Xbox controller status messages"""
+        self.ConsoleOutput.appendPlainText(f">>> Xbox Controller: {status_message}")
+
+    def handleXboxButton(self, button_command):
+        """Handle Xbox controller button commands"""
+        if button_command == 'home':
+            self.sendHomingCycleCommand()
+        elif button_command == 'zero':
+            self.sendZeroPositionCommand()
+        elif button_command == 'kill_alarm':
+            self.sendKillAlarmCommand()
+
+    def handleXboxGripper(self, gripper_value):
+        """Handle Xbox controller gripper input"""
+        self.SpinBoxGripper.setValue(gripper_value)
+        self.XboxControllerThread.update_joint_value('Gripper', gripper_value)
+        # Auto-execute gripper movement
+        self.MoveGripper()
 
 ############### SERIAL READ THREAD CLASS ###############
 

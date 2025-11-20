@@ -5,6 +5,7 @@ Asgard is a Graphical User Interface (GUI) for [Thor](https://github.com/AngelLM
 * Key features:
   *  User-friendly Graphical Interface
   *  Forward Kinematics implementation (1st version)
+  *  Xbox Controller support for real-time robotic arm control
   *  Inverse Kinematics implementation (2nd version) - *Coming soon*
   *  Sequence Programmer (3rd version) - *Coming soon*
 * Some things that I would want to add, but not in the short-term:
@@ -12,6 +13,82 @@ Asgard is a Graphical User Interface (GUI) for [Thor](https://github.com/AngelLM
   * 3D IK Controller/Sequence Programmer
 
 <img src="doc/AsgardGUI.png" width="800">
+
+## Xbox Controller Support
+
+Asgard now includes Xbox controller support for intuitive, real-time control of the Thor robotic arm!
+
+### Requirements
+* Python pygame library: `pip install pygame`
+* Xbox controller (Xbox 360, Xbox One, or compatible controller)
+
+### Controller Mapping
+
+**Joysticks:**
+* **Left Stick X-axis**: Art1 (Joint A - Base Rotation)
+* **Left Stick Y-axis**: Art2 (Joints B/C - Shoulder)
+* **Right Stick X-axis**: Art5 (Joint Y - Wrist Rotation)
+* **Right Stick Y-axis**: Art4 (Joint X - Wrist Pitch)
+
+**D-Pad:**
+* **D-Pad Up/Down**: Art3 (Joint D - Elbow)
+* **D-Pad Left/Right**: Art6 (Joint Z - Wrist Roll)
+
+**Triggers:**
+* **Right Trigger**: Open Gripper
+* **Left Trigger**: Close Gripper
+
+**Buttons:**
+* **Start Button**: Homing Cycle ($H)
+* **Back/Select Button**: Zero Position
+* **X Button**: Kill Alarm ($X)
+* **Y Button**: Toggle control mode (Continuous/Incremental)
+* **B Button**: Emergency stop (reserved for future use)
+
+### Usage
+
+1. Connect your Xbox controller to your computer via USB or Bluetooth
+2. Launch Asgard - the Xbox controller will be automatically detected and enabled
+3. Status messages will appear in the console showing controller connection status
+4. Use the controller as mapped above to control the robotic arm
+
+### Control Modes
+
+* **Continuous Mode** (default): Joystick movements immediately control the arm in real-time
+* **Incremental Mode**: Joystick movements update the target position but require pressing the 'A' button to execute
+* Toggle between modes by pressing the **Y button** on the controller
+
+### Features
+
+* Automatic controller detection on startup
+* Real-time position updates synchronized with GUI
+* Adjustable deadzone to prevent joystick drift
+* Configurable sensitivity and movement speed
+* Visual feedback in the console for all controller actions
+
+## Installation
+
+### Requirements
+* Python 3.4 or higher
+* PyQt5
+* pyserial
+* pygame (for Xbox controller support)
+
+### Quick Install
+Install all dependencies using pip:
+```bash
+pip install -r requirements.txt
+```
+
+Or install individually:
+```bash
+pip install PyQt5 pyserial pygame
+```
+
+### Running Asgard
+```bash
+python asgard.py
+```
 
 ## Tools and useful links
 * **QtDesigner** - Used to design the graphical part of gui
