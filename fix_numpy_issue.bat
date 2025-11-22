@@ -83,10 +83,25 @@ echo.
 echo Step 7: Installing other dependencies...
 echo ========================================
 
-pip install matplotlib scipy pygame
+pip install matplotlib scipy
 
 echo.
-echo Step 8: Testing numpy installation...
+echo Step 8: Installing pygame (using pre-built wheel)...
+echo ========================================
+echo Note: Using --only-binary to avoid build issues on Python 3.12+
+
+pip install pygame --only-binary :all:
+if errorlevel 1 (
+    echo Trying alternative pygame installation...
+    pip install pygame==2.5.2
+)
+if errorlevel 1 (
+    echo Trying pygame-ce as fallback...
+    pip install pygame-ce
+)
+
+echo.
+echo Step 9: Testing numpy installation...
 echo ========================================
 
 python -c "import numpy; print('SUCCESS: Numpy version:', numpy.__version__)"

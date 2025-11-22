@@ -22,9 +22,18 @@ Author: Asgard Team
 License: CC-BY-SA 4.0
 """
 
-import pygame
 from PyQt5 import QtCore
 import time
+
+# Try to import pygame, set flag if unavailable
+PYGAME_AVAILABLE = False
+try:
+    import pygame
+    PYGAME_AVAILABLE = True
+except ImportError:
+    print("WARNING: pygame not installed. Xbox controller support disabled.")
+    print("Install pygame with: pip install pygame --only-binary :all:")
+    print("Or run: install_pygame.bat")
 
 
 class XboxControllerThread(QtCore.QThread):
@@ -72,6 +81,10 @@ class XboxControllerThread(QtCore.QThread):
 
     def initialize_controller(self):
         """Initialize pygame and detect Xbox controller"""
+        if not PYGAME_AVAILABLE:
+            self.statusSignal.emit("pygame not installed - Xbox controller disabled")
+            return False
+
         try:
             pygame.init()
             pygame.joystick.init()
@@ -251,9 +264,10 @@ class XboxControllerThread(QtCore.QThread):
             time.sleep(self.update_interval)
 
         # Cleanup
-        if self.controller:
-            self.controller.quit()
-        pygame.quit()
+        if PYGAME_AVAILABLE:
+            if self.controller:
+                self.controller.quit()
+            pygame.quit()
         self.statusSignal.emit("Xbox controller disconnected")
 
     def stop(self):

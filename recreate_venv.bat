@@ -101,7 +101,16 @@ pip install scipy
 
 echo.
 echo Installing pygame (for Xbox controller)...
-pip install pygame
+echo Note: Using pre-built wheel to avoid build issues on Python 3.12+
+pip install pygame --only-binary :all:
+if errorlevel 1 (
+    echo Trying specific version...
+    pip install pygame==2.5.2
+)
+if errorlevel 1 (
+    echo Trying pygame-ce as fallback...
+    pip install pygame-ce
+)
 
 echo.
 echo Step 8: Verifying installation...
